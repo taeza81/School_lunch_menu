@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+@theme {
+  --color-pastel-blue: #AEC6CF;
+  --color-pastel-pink: #FFB7B2;
+  --color-pastel-yellow: #FFDAC1;
+  --color-pastel-green: #B5EAD7;
+  --color-pastel-purple: #C7CEEA;
+}
+
+body {
+  background-color: var(--color-pastel-yellow);
+  color: #1f2937;
+  font-family: sans-serif;
+  overflow-x: hidden;
+}
+
+/* Print CSS Optimization */
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 1cm;
+  }
+  body {
+    background-color: white !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+}

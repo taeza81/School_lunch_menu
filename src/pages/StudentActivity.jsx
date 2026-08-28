@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { db } from '../firebase'
-import { doc, getDoc } from 'firebase/firestore'
+import { doc, getDoc, collection, getDocs } from 'firebase/firestore'
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
-import { Maximize, Minimize, Shrink, Expand, Home, Printer, Volume2 } from 'lucide-react'
+import { Maximize, Minimize, Shrink, Expand, Home, Printer, Volume2, ChevronLeft, ChevronRight } from 'lucide-react'
 
 // Steps: 1(요일송), 2(날짜), 3(날씨), 4(급식안내), 5(드래그앤드롭), 6(활동지)
 export default function StudentActivity() {
-  const [step, setStep] = useState(1)
+  const navigate = useNavigate()
+  const [step, setStep] = useState(0)
   const [date, setDate] = useState(new Date())
   const [menus, setMenus] = useState(null)
   const [isMiniMode, setIsMiniMode] = useState(false)
@@ -43,9 +44,14 @@ export default function StudentActivity() {
   }
 
   useEffect(() => {
-    // 오늘 날짜 기준 메뉴 불러오기
+    // 날짜별 급식 메뉴 불러오기
     const fetchMenu = async () => {
-      const dateStr = date.toISOString().split('T')[0]
+      // 날짜가 바뀌면 이전 데이터를 먼저 초기화!
+      setMenus(null)
+
+      const pad = n => n.toString().padStart(2, '0')
+      // 로컬 시간 기준으로 yyyy-mm-dd 생성 (toISOString()은 UTC 기준이라 하루 전으로 나올 수 있음)
+      const dateStr = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
       const isMock = localStorage.getItem('useLocalMock') === 'true'
       
       if (!schoolCode) return;
@@ -55,6 +61,8 @@ export default function StudentActivity() {
           const localData = localStorage.getItem(`menus_${schoolCode}_${dateStr}`)
           if (localData) {
             setMenus(JSON.parse(localData))
+          } else {
+            setMenus(null)
           }
           return
         }
@@ -63,23 +71,27 @@ export default function StudentActivity() {
         const docSnap = await getDoc(docRef)
         if (docSnap.exists()) {
           setMenus(docSnap.data().menus)
+        } else {
+          setMenus(null)
         }
       } catch (error) {
         console.error(error)
         const localData = localStorage.getItem(`menus_${schoolCode}_${dateStr}`)
         if (localData) {
           setMenus(JSON.parse(localData))
+        } else {
+          setMenus(null)
         }
       }
     }
     fetchMenu()
-  }, [date])
+  }, [date, schoolCode])
 
-  const nextStep = () => setStep(s => Math.min(s + 1, 6))
-  const prevStep = () => setStep(s => Math.max(s - 1, 1))
+  const nextStep = () => setStep(s => Math.min(s + 1, 7))
+  const prevStep = () => setStep(s => Math.max(s - 1, 0))
 
   return (
-    <div className={`${isFullScreen ? 'h-screen overflow-hidden' : 'min-h-screen'} bg-pastel-green p-4 flex flex-col ${isMiniMode ? 'justify-end items-center pb-12' : ''}`}>
+    <div className={`${isFullScreen ? 'h-screen overflow-hidden print:overflow-visible print:h-auto' : 'min-h-screen'} bg-pastel-green p-4 flex flex-col ${isMiniMode ? 'justify-end items-center pb-12' : ''} print:p-0 print:bg-white print:block`}>
       <div className="flex justify-between items-center mb-4 no-print w-full max-w-[1600px] mx-auto shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 md:w-12 md:h-12 rounded-full overflow-hidden shadow-sm border-2 border-white shrink-0 bg-white">
@@ -87,85 +99,75 @@ export default function StudentActivity() {
           </div>
           <h1 className="text-2xl md:text-3xl font-bold text-gray-800">오늘의 급식 활동</h1>
         </div>
-        <div className="flex gap-3">
-          <Link to="/" className="flex items-center gap-2 bg-white/80 hover:bg-white text-gray-700 font-bold px-4 py-2 rounded-xl transition-colors shadow-sm">
+        <div className="flex gap-2 md:gap-4">
+          <button 
+            onClick={() => {
+              if (isFullScreen) enterWindowMode()
+              navigate('/')
+            }}
+            className="flex items-center gap-2 bg-white/80 hover:bg-white text-gray-700 font-bold px-4 py-2 rounded-xl transition-colors shadow-sm"
+          >
             <Home size={20} /> 홈
-          </Link>
+          </button>
 
-          {!isFullScreen && (
-            <button 
-              onClick={enterFullScreen}
-              className="flex items-center gap-2 bg-white/80 hover:bg-white text-gray-700 font-bold px-4 py-2 rounded-xl transition-colors shadow-sm"
-            >
-              <Maximize size={20} /> 전체 화면
-            </button>
-          )}
+          <button 
+            onClick={isFullScreen ? enterWindowMode : enterFullScreen}
+            className="flex items-center gap-2 bg-white/80 hover:bg-white text-gray-700 font-bold px-4 py-2 rounded-xl transition-colors shadow-sm"
+          >
+            {isFullScreen ? <><Minimize size={20} /> 창 모드</> : <><Maximize size={20} /> 전체 화면</>}
+          </button>
 
           {isFullScreen && (
-            <>
-              <button 
-                onClick={enterWindowMode}
-                className="flex items-center gap-2 bg-white/80 hover:bg-white text-gray-700 font-bold px-4 py-2 rounded-xl transition-colors shadow-sm"
-              >
-                <Minimize size={20} /> 창 모드
-              </button>
-              
-              {!isMiniMode ? (
-                <button 
-                  onClick={() => setIsMiniMode(true)}
-                  className="flex items-center gap-2 bg-white/80 hover:bg-white text-gray-700 font-bold px-4 py-2 rounded-xl transition-colors shadow-sm"
-                >
-                  <Shrink size={20} /> 화면 축소
-                </button>
-              ) : (
-                <button 
-                  onClick={() => setIsMiniMode(false)}
-                  className="flex items-center gap-2 bg-white/80 hover:bg-white text-gray-700 font-bold px-4 py-2 rounded-xl transition-colors shadow-sm"
-                >
-                  <Expand size={20} /> 화면 확대
-                </button>
-              )}
-            </>
+            <button 
+              onClick={() => setIsMiniMode(!isMiniMode)}
+              className="flex items-center gap-2 bg-white/80 hover:bg-white text-gray-700 font-bold px-4 py-2 rounded-xl transition-colors shadow-sm"
+            >
+              {isMiniMode ? <><Expand size={20} /> 화면 확대</> : <><Shrink size={20} /> 화면 축소</>}
+            </button>
           )}
         </div>
       </div>
       
-      <div className={`bg-white rounded-3xl shadow-xl overflow-hidden transition-transform duration-500 ease-in-out flex flex-col w-full max-w-[1600px] mx-auto flex-1 min-h-0 ${isMiniMode ? 'scale-[0.6] origin-bottom' : ''}`}>
+      <div className={`bg-white rounded-3xl shadow-xl overflow-hidden transition-transform duration-500 ease-in-out flex flex-col w-full max-w-[1600px] mx-auto flex-1 min-h-0 ${isMiniMode ? 'scale-[0.6] origin-bottom' : ''} print:transform-none print:overflow-visible print:shadow-none print:rounded-none print:block`}>
         
         {/* 콘텐츠 영역 */}
-        <div className={`flex-1 flex flex-col p-4 md:p-8 print:p-0 print:overflow-visible ${[2, 3, 4, 5].includes(step) ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+        <div className={`flex-1 flex flex-col p-4 md:p-8 print:p-0 print:overflow-visible ${[0, 2, 3, 4, 5].includes(step) ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+          {step === 0 && <Activity0 date={date} onSelectDate={(d) => { setDate(d); setStep(1); }} />}
           {step === 1 && <Activity1 />}
           {step === 2 && <Activity2 date={date} />}
           {step === 3 && <Activity3 />}
           {step === 4 && <Activity4 menus={menus} />}
           {step === 5 && <Activity5 menus={menus} isMiniMode={isMiniMode} />}
           {step === 6 && <Activity6 menus={menus} />}
+          {step === 7 && <Activity7 menus={menus} />}
         </div>
 
         {/* 네비게이션 */}
-        <div className="bg-gray-50 p-4 border-t flex justify-between items-center no-print">
-          <button 
-            onClick={prevStep} 
-            disabled={step === 1}
-            className="bg-pastel-blue px-6 py-3 rounded-2xl font-bold text-lg disabled:opacity-30 hover:bg-blue-300"
-          >
-            이전
-          </button>
-          
-          <div className="flex gap-2">
-            {[1,2,3,4,5,6].map(i => (
-              <div key={i} className={`w-4 h-4 rounded-full ${step === i ? 'bg-pastel-pink' : 'bg-gray-300'}`} />
-            ))}
-          </div>
+        {step > 0 && (
+          <div className="bg-gray-50 p-4 border-t flex justify-between items-center no-print">
+            <button 
+              onClick={prevStep} 
+              disabled={step === 0}
+              className="bg-pastel-blue px-6 py-3 rounded-2xl font-bold text-lg disabled:opacity-30 hover:bg-blue-300"
+            >
+              이전
+            </button>
+            
+            <div className="flex gap-2">
+              {[1,2,3,4,5,6,7].map(i => (
+                <div key={i} className={`w-4 h-4 rounded-full ${step === i ? 'bg-pastel-pink' : 'bg-gray-300'}`} />
+              ))}
+            </div>
 
-          <button 
-            onClick={nextStep} 
-            disabled={step === 6}
-            className="bg-pastel-blue px-6 py-3 rounded-2xl font-bold text-lg disabled:opacity-30 hover:bg-blue-300"
-          >
-            다음
-          </button>
-        </div>
+            <button 
+              onClick={nextStep} 
+              disabled={step === 7}
+              className="bg-pastel-blue px-6 py-3 rounded-2xl font-bold text-lg disabled:opacity-30 hover:bg-blue-300"
+            >
+              다음
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -473,10 +475,10 @@ function Activity5({ menus, isMiniMode }) {
       <h2 className={`font-bold text-gray-800 text-center shrink-0 ${isMiniMode ? 'text-2xl' : 'text-4xl'}`}>🍱 알맞은 자리에 담아볼까요?</h2>
       
       <DragDropContext onDragEnd={onDragEnd}>
-        <div className="flex flex-col gap-6 w-full max-w-[1500px] flex-1 min-h-0 items-center justify-start xl:justify-center mt-2">
+        <div className="flex flex-col gap-6 w-full max-w-[1500px] flex-1 min-h-0 items-center justify-between">
           
-          {/* 6구 식판 UI (비율 고정으로 창 모드에서도 찌그러짐 방지) */}
-          <div className="w-full max-w-[min(64rem,calc(55vh*16/9))] mx-auto bg-[#E5E7EB] rounded-[3rem] p-4 md:p-6 shadow-inner relative flex gap-4 md:gap-6 aspect-video mb-8 shrink-0">
+          {/* 6구 식판 UI (화면 크기에 맞춰 동적으로 최대 크기 계산) */}
+          <div className="w-full mx-auto bg-[#E5E7EB] rounded-[2rem] md:rounded-[3rem] p-4 md:p-6 shadow-inner relative flex gap-4 md:gap-6 aspect-video shrink-0" style={{ maxWidth: 'min(64rem, calc((100vh - 300px) * 16 / 9))' }}>
             <div className="grid grid-cols-4 grid-rows-[1fr_1.4fr] gap-4 md:gap-6 flex-1 min-h-0">
               {/* 위쪽 줄: 반찬4개 */}
               <TraySlot id="side1" item={tray.side1} targetItem={menus?.side1} label="반찬 1" className={slotClass} onSlotClick={handleSlotClick} />
@@ -585,7 +587,7 @@ function TraySlot({ id, item, targetItem, label, className, onSlotClick }) {
                 /* 빈칸일 때 (흐릿한 흑백 힌트 + 칸 이름) */
                 <>
                   {targetItem && targetItem.imageUrl && (
-                    <img src={targetItem.imageUrl} className="absolute inset-0 w-full h-full object-cover opacity-10 grayscale-[80%] blur-[2px]" />
+                    <img src={targetItem.imageUrl} className="absolute inset-0 w-full h-full object-cover opacity-20 grayscale" />
                   )}
                 </>
               )}
@@ -608,7 +610,7 @@ function Activity6({ menus }) {
   return (
     <div className="flex flex-col items-center h-full space-y-6">
       <div className="flex justify-between items-center w-full max-w-4xl no-print">
-        <h2 className="text-4xl font-bold text-gray-800">📝 따라 쓰기 활동지</h2>
+        <h2 className="text-4xl font-bold text-gray-800">📝 (활동지) 급식 메뉴 이름 쓰기</h2>
         <button onClick={() => window.print()} className="bg-pastel-blue hover:bg-blue-300 px-6 py-3 rounded-2xl font-bold text-lg flex items-center gap-2 shadow-md">
           <Printer /> 인쇄하기
         </button>
@@ -659,6 +661,247 @@ function Activity6({ menus }) {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+// 7. 식판 메뉴 따라 붙이기 활동지
+function Activity7({ menus }) {
+  if (!menus) return null;
+  const menuItems = Object.entries(menus)
+    .filter(([_, m]) => m && m.name)
+    .map(([key, m]) => ({ id: key, ...m }));
+
+  return (
+    <div className="flex flex-col items-center h-full space-y-6 overflow-y-auto w-full">
+      <div className="flex justify-between items-center w-full max-w-4xl no-print shrink-0 px-4 mt-4">
+        <h2 className="text-3xl md:text-4xl font-bold text-gray-800 flex items-center gap-3">
+          <img src={`${import.meta.env.BASE_URL}glue_icon_new.jpg`} alt="풀" className="h-[2.5em] w-[2.5em] object-contain mix-blend-multiply -my-4 -ml-4 -mr-2" />
+          <span>(활동지) 식판 메뉴 따라 붙이기</span>
+        </h2>
+        <button onClick={() => window.print()} className="bg-pastel-blue hover:bg-blue-300 px-6 py-3 rounded-2xl font-bold text-lg flex items-center gap-2 shadow-md">
+          <Printer /> 인쇄하기
+        </button>
+      </div>
+
+      <style type="text/css" media="print">
+        {`
+          @page { size: A4 landscape; margin: 0; }
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .page-break { page-break-after: always; }
+        `}
+      </style>
+
+      <div className="flex flex-col gap-8 w-full items-center pb-10 print:pb-0 print:gap-0 overflow-x-auto print:overflow-visible print:block">
+        
+        {/* PAGE 1: Tray with grayscale items */}
+        <div className="bg-white w-[297mm] h-[210mm] print:w-[100vw] print:h-[100vh] shrink-0 shadow-2xl flex flex-col border border-gray-200 print:shadow-none print:border-none print:m-0 box-border relative overflow-hidden page-break mx-auto">
+          <div className="absolute top-0 left-0 w-full flex justify-between items-center px-[8mm] py-[5mm] print:px-[3%] print:py-[2%]">
+             <h1 className="text-[8mm] print:text-[3vw] font-black text-gray-800">식판 메뉴 따라 붙이기</h1>
+             <div className="text-[4.5mm] print:text-[1.5vw] font-bold text-gray-700">
+               <span>____년 ____월 ____일 &nbsp; 이름: ______________</span>
+             </div>
+          </div>
+          
+          {/* Tray Design */}
+          <div className="absolute top-[20mm] print:top-[11%] left-[50%] translate-x-[-50%] w-[285mm] h-[184mm] print:w-[96%] print:h-[86%] bg-[#E5E7EB] rounded-[15mm] print:rounded-[3vw] p-[8mm] print:p-[2%] shadow-inner flex gap-[6mm] print:gap-[2%] border border-gray-300">
+            <div className="grid grid-cols-4 grid-rows-[1fr_1.4fr] gap-[6mm] print:gap-[2%] flex-1">
+              {['side1', 'side2', 'side3', 'side4'].map(slot => {
+                const item = menuItems.find(m => m.id === slot);
+                return (
+                  <div key={slot} className="w-full h-full bg-white rounded-[8mm] print:rounded-[2vw] shadow-sm flex flex-col items-center justify-center overflow-hidden border border-gray-300 relative">
+                    {item && item.imageUrl && <img src={item.imageUrl} className="absolute inset-0 w-full h-full object-cover opacity-40 grayscale" />}
+                  </div>
+                )
+              })}
+              <div className="col-span-2 w-full h-full bg-white rounded-[8mm] print:rounded-[2vw] shadow-sm flex flex-col items-center justify-center overflow-hidden border border-gray-300 relative">
+                 {(() => {
+                   const item = menuItems.find(m => m.id === 'rice');
+                   return item && item.imageUrl && <img src={item.imageUrl} className="absolute inset-0 w-full h-full object-cover opacity-40 grayscale" />
+                 })()}
+              </div>
+              <div className="col-span-2 w-full h-full flex flex-col items-center justify-center">
+                 <div className="w-[98%] h-[98%] bg-white rounded-full shadow-sm flex flex-col items-center justify-center overflow-hidden border border-gray-300 relative">
+                   {(() => {
+                     const item = menuItems.find(m => m.id === 'soup');
+                     return item && item.imageUrl && <img src={item.imageUrl} className="absolute inset-0 w-full h-full object-cover opacity-40 grayscale" />
+                   })()}
+                 </div>
+              </div>
+            </div>
+            
+            {/* Utensils Placeholder */}
+            <div className="w-[20mm] print:w-[8%] shrink-0 h-full rounded-[8mm] print:rounded-[2vw] border-[1.5mm] print:border-[0.4vw] border-gray-300 bg-gray-100 flex items-center justify-center overflow-hidden relative">
+               <img src={`${import.meta.env.BASE_URL}utensils_flat.jpg`} alt="" className="absolute w-[150%] h-[150%] object-contain opacity-70 mix-blend-multiply scale-[1.5]" />
+            </div>
+          </div>
+        </div>
+
+        {/* PAGE 2: Color items with dotted lines */}
+        <div className="bg-white w-[297mm] h-[210mm] print:w-[100vw] print:h-[100vh] shrink-0 shadow-2xl flex flex-col border border-gray-200 print:shadow-none print:border-none print:m-0 box-border relative overflow-hidden mx-auto">
+          <div className="absolute top-[20mm] print:top-[11%] left-[50%] translate-x-[-50%] w-[285mm] h-[184mm] print:w-[96%] print:h-[86%] flex gap-[6mm] print:gap-[2%] p-[8mm] print:p-[2%]">
+            <div className="grid grid-cols-4 grid-rows-[1fr_1.4fr] gap-[6mm] print:gap-[2%] flex-1">
+              {['side1', 'side2', 'side3', 'side4'].map(slot => {
+                const item = menuItems.find(m => m.id === slot);
+                return (
+                  <div key={slot} className="w-full h-full flex items-center justify-center">
+                    {item && item.imageUrl && (
+                      <div className="w-full h-full rounded-[8mm] print:rounded-[2vw] border-[2.5mm] print:border-[0.6vw] border-dashed border-gray-800 p-1 overflow-hidden bg-white relative">
+                        <img src={item.imageUrl} className="absolute inset-0 w-full h-full object-cover rounded-[5mm] print:rounded-[1.5vw]" />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+              <div className="col-span-2 w-full h-full flex items-center justify-center">
+                 {(() => {
+                   const item = menuItems.find(m => m.id === 'rice');
+                   return item && item.imageUrl && (
+                      <div className="w-full h-full rounded-[8mm] print:rounded-[2vw] border-[2.5mm] print:border-[0.6vw] border-dashed border-gray-800 p-1 overflow-hidden bg-white relative">
+                        <img src={item.imageUrl} className="absolute inset-0 w-full h-full object-cover rounded-[5mm] print:rounded-[1.5vw]" />
+                      </div>
+                   )
+                 })()}
+              </div>
+              <div className="col-span-2 w-full h-full flex items-center justify-center">
+                 {(() => {
+                   const item = menuItems.find(m => m.id === 'soup');
+                   return item && item.imageUrl && (
+                      <div className="w-[98%] h-[98%] rounded-full border-[2.5mm] print:border-[0.6vw] border-dashed border-gray-800 p-1 overflow-hidden bg-white relative">
+                        <img src={item.imageUrl} className="absolute inset-0 w-full h-full object-cover rounded-full" />
+                      </div>
+                   )
+                 })()}
+              </div>
+            </div>
+            <div className="w-[20mm] shrink-0 h-full"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  )
+}
+
+
+// 0. 날짜 선택 캘린더
+function Activity0({ date, onSelectDate }) {
+  const [currentDate, setCurrentDate] = useState(new Date())
+  const [savedDates, setSavedDates] = useState([])
+
+  const year = currentDate.getFullYear()
+  const month = currentDate.getMonth()
+
+  const days = ['일', '월', '화', '수', '목', '금', '토']
+  const firstDay = new Date(year, month, 1).getDay()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+
+  const schoolCode = localStorage.getItem('schoolCode')
+  const isMock = localStorage.getItem('useLocalMock') === 'true'
+
+  useEffect(() => {
+    const fetchDates = async () => {
+      if (!schoolCode) return;
+      const dates = [];
+      try {
+        if (!isMock) {
+          const querySnapshot = await getDocs(collection(db, 'schools', schoolCode, 'menus'));
+          querySnapshot.forEach(doc => dates.push(doc.id));
+        } else {
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key.startsWith(`menus_${schoolCode}_`)) {
+              dates.push(key.replace(`menus_${schoolCode}_`, ''));
+            }
+          }
+        }
+        setSavedDates(dates);
+      } catch (e) {
+        console.error("Failed to load saved dates", e);
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key.startsWith(`menus_${schoolCode}_`)) {
+            dates.push(key.replace(`menus_${schoolCode}_`, ''));
+          }
+        }
+        setSavedDates(dates);
+      }
+    }
+    fetchDates();
+  }, [schoolCode, isMock, month, year]);
+
+  const prevMonth = () => {
+    setCurrentDate(new Date(year, month - 1, 1))
+  }
+
+  const nextMonth = () => {
+    setCurrentDate(new Date(year, month + 1, 1))
+  }
+
+  const todayDate = new Date()
+
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center w-full min-h-0 space-y-4 md:space-y-6 py-2">
+      <h2 className="text-3xl md:text-5xl font-bold text-gray-800 text-center shrink-0">활동 날짜를 선택해주세요</h2>
+      
+      <div className="w-full max-w-4xl bg-white rounded-3xl shadow-xl border-4 border-pastel-yellow p-4 md:p-8 flex flex-col min-h-0 flex-1 mb-4">
+        {/* Calendar Header */}
+        <div className="flex justify-between items-center mb-4 md:mb-6 shrink-0">
+          <button onClick={prevMonth} className="p-2 md:p-3 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors">
+            <ChevronLeft size={32} className="text-gray-700" />
+          </button>
+          <h3 className="text-2xl md:text-4xl font-bold text-gray-800">
+            {year}년 {month + 1}월
+          </h3>
+          <button onClick={nextMonth} className="p-2 md:p-3 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors">
+            <ChevronRight size={32} className="text-gray-700" />
+          </button>
+        </div>
+
+        {/* Calendar Grid */}
+        <div className="grid grid-cols-7 gap-2 md:gap-4 flex-1 min-h-0">
+          {days.map(d => (
+            <div key={d} className="text-center font-bold text-base md:text-xl text-gray-500 py-1 shrink-0">
+              {d}
+            </div>
+          ))}
+          
+          {Array.from({ length: firstDay }).map((_, i) => (
+            <div key={`empty-${i}`} className="p-1" />
+          ))}
+          
+          {Array.from({ length: daysInMonth }).map((_, i) => {
+            const dayNum = i + 1
+            const isToday = todayDate.getFullYear() === year && todayDate.getMonth() === month && todayDate.getDate() === dayNum
+            
+            const pad = n => n.toString().padStart(2, '0')
+            const dateStr = `${year}-${pad(month + 1)}-${pad(dayNum)}`
+            const hasMenu = savedDates.includes(dateStr)
+
+            return (
+              <button
+                key={dayNum}
+                onClick={() => onSelectDate(new Date(year, month, dayNum))}
+                className={`
+                  w-full h-full min-h-[50px] flex flex-col items-center justify-center rounded-xl md:rounded-2xl text-xl md:text-3xl font-bold transition-all relative
+                  ${isToday 
+                    ? 'bg-pastel-pink text-white ring-4 ring-pastel-pink/30' 
+                    : (hasMenu 
+                        ? 'bg-blue-50 text-blue-800 border-2 border-pastel-blue hover:bg-pastel-blue hover:text-white' 
+                        : 'bg-gray-50 text-gray-700 hover:bg-gray-200')}
+                  shadow-sm hover:shadow-md hover:scale-105
+                `}
+              >
+                <span>{dayNum}</span>
+                {hasMenu && (
+                  <div className={`absolute bottom-1 w-1.5 h-1.5 md:w-2 md:h-2 rounded-full ${isToday ? 'bg-white' : 'bg-pastel-blue'}`} />
+                )}
+              </button>
+            )
+          })}
         </div>
       </div>
     </div>

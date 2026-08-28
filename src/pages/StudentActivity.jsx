@@ -468,7 +468,7 @@ function Activity5({ menus, isMiniMode }) {
     setSelectedItem(null)
   }
 
-  const slotClass = "w-full h-full min-h-0 rounded-[2rem] border-4 border-gray-300 border-dashed flex items-center justify-center overflow-hidden bg-gray-50/50"
+  const slotClass = "w-full h-full min-h-0 rounded-[2rem] border-4 border-orange-500 border-dashed flex items-center justify-center overflow-hidden bg-white/50"
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center w-full min-h-full space-y-4 py-4">
@@ -478,7 +478,7 @@ function Activity5({ menus, isMiniMode }) {
         <div className="flex flex-col gap-6 w-full max-w-[1500px] flex-1 min-h-0 items-center justify-between">
           
           {/* 6구 식판 UI (화면 크기에 맞춰 동적으로 최대 크기 계산) */}
-          <div className="w-full mx-auto bg-[#E5E7EB] rounded-[2rem] md:rounded-[3rem] p-4 md:p-6 shadow-inner relative flex gap-4 md:gap-6 aspect-video shrink-0" style={{ maxWidth: 'min(64rem, calc((100vh - 300px) * 16 / 9))' }}>
+          <div className="w-full mx-auto bg-yellow-50 rounded-[2rem] md:rounded-[3rem] p-4 md:p-6 shadow-inner relative flex gap-4 md:gap-6 aspect-video shrink-0" style={{ maxWidth: 'min(64rem, calc((100vh - 300px) * 16 / 9))' }}>
             <div className="grid grid-cols-4 grid-rows-[1fr_1.4fr] gap-4 md:gap-6 flex-1 min-h-0">
               {/* 위쪽 줄: 반찬4개 */}
               <TraySlot id="side1" item={tray.side1} targetItem={menus?.side1} label="반찬 1" className={slotClass} onSlotClick={handleSlotClick} />
@@ -497,7 +497,7 @@ function Activity5({ menus, isMiniMode }) {
 
             {/* 우측 수저통 영역 */}
             <div className="w-16 md:w-24 shrink-0 flex flex-col h-full py-2">
-              <div className="w-full h-full rounded-[3rem] border-[6px] border-gray-300 bg-gray-100 flex items-center justify-center shadow-inner overflow-hidden relative">
+              <div className="w-full h-full rounded-[3rem] border-[6px] border-yellow-300 bg-yellow-50 flex items-center justify-center shadow-inner overflow-hidden relative">
                 <img src={`${import.meta.env.BASE_URL}utensils_flat.jpg`} alt="수저 세트" className="w-full h-full object-contain opacity-70 mix-blend-multiply scale-[1.4] md:scale-[1.5] origin-center" />
               </div>
             </div>
@@ -573,7 +573,7 @@ function TraySlot({ id, item, targetItem, label, className, onSlotClick }) {
         >
           {/* 안쪽 카드 영역 (항상 존재하여 모양을 동일하게 유지) */}
           <div className="absolute inset-0 w-full h-full p-2 md:p-3">
-            <div className="w-full h-full bg-white rounded-2xl md:rounded-[1.5rem] shadow-sm flex flex-col items-center justify-center overflow-hidden border-2 border-gray-100 relative group bg-gray-50">
+            <div className="w-full h-full bg-white rounded-2xl md:rounded-[1.5rem] shadow-sm flex flex-col items-center justify-center overflow-hidden border-2 border-orange-200 relative group">
               
               {item ? (
                 /* 음식이 놓였을 때 (선명한 사진 + 이름) */
@@ -707,24 +707,24 @@ function Activity7({ menus }) {
           </div>
           
           {/* Tray Design */}
-          <div className="absolute top-[20mm] print:top-[11%] left-[50%] translate-x-[-50%] w-[285mm] h-[184mm] print:w-[96%] print:h-[86%] bg-[#E5E7EB] rounded-[15mm] print:rounded-[3vw] p-[8mm] print:p-[2%] shadow-inner flex gap-[6mm] print:gap-[2%] border border-gray-300">
+          <div className="absolute top-[20mm] print:top-[11%] left-[50%] translate-x-[-50%] w-[285mm] h-[184mm] print:w-[96%] print:h-[86%] bg-yellow-50 rounded-[15mm] print:rounded-[3vw] p-[8mm] print:p-[2%] shadow-inner flex gap-[6mm] print:gap-[2%] border-2 border-yellow-300">
             <div className="grid grid-cols-4 grid-rows-[1fr_1.4fr] gap-[6mm] print:gap-[2%] flex-1">
               {['side1', 'side2', 'side3', 'side4'].map(slot => {
                 const item = menuItems.find(m => m.id === slot);
                 return (
-                  <div key={slot} className="w-full h-full bg-white rounded-[8mm] print:rounded-[2vw] shadow-sm flex flex-col items-center justify-center overflow-hidden border border-gray-300 relative">
+                  <div key={slot} className="w-full h-full bg-white rounded-[8mm] print:rounded-[2vw] shadow-sm flex flex-col items-center justify-center overflow-hidden border-2 border-orange-200 relative">
                     {item && item.imageUrl && <img src={item.imageUrl} className="absolute inset-0 w-full h-full object-cover opacity-40 grayscale" />}
                   </div>
                 )
               })}
-              <div className="col-span-2 w-full h-full bg-white rounded-[8mm] print:rounded-[2vw] shadow-sm flex flex-col items-center justify-center overflow-hidden border border-gray-300 relative">
+              <div className="col-span-2 w-full h-full bg-white rounded-[8mm] print:rounded-[2vw] shadow-sm flex flex-col items-center justify-center overflow-hidden border-2 border-orange-200 relative">
                  {(() => {
                    const item = menuItems.find(m => m.id === 'rice');
                    return item && item.imageUrl && <img src={item.imageUrl} className="absolute inset-0 w-full h-full object-cover opacity-40 grayscale" />
                  })()}
               </div>
               <div className="col-span-2 w-full h-full flex flex-col items-center justify-center">
-                 <div className="w-[98%] h-[98%] bg-white rounded-full shadow-sm flex flex-col items-center justify-center overflow-hidden border border-gray-300 relative">
+                 <div className="w-[98%] h-[98%] bg-white rounded-full shadow-sm flex flex-col items-center justify-center overflow-hidden border-2 border-orange-200 relative">
                    {(() => {
                      const item = menuItems.find(m => m.id === 'soup');
                      return item && item.imageUrl && <img src={item.imageUrl} className="absolute inset-0 w-full h-full object-cover opacity-40 grayscale" />
@@ -734,7 +734,7 @@ function Activity7({ menus }) {
             </div>
             
             {/* Utensils Placeholder */}
-            <div className="w-[20mm] print:w-[8%] shrink-0 h-full rounded-[8mm] print:rounded-[2vw] border-[1.5mm] print:border-[0.4vw] border-gray-300 bg-gray-100 flex items-center justify-center overflow-hidden relative">
+            <div className="w-[20mm] print:w-[8%] shrink-0 h-full rounded-[8mm] print:rounded-[2vw] border-[1.5mm] print:border-[0.4vw] border-yellow-300 bg-yellow-50 flex items-center justify-center overflow-hidden relative">
                <img src={`${import.meta.env.BASE_URL}utensils_flat.jpg`} alt="" className="absolute w-[150%] h-[150%] object-contain opacity-70 mix-blend-multiply scale-[1.5]" />
             </div>
           </div>

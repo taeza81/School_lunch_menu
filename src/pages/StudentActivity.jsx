@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { db } from '../firebase'
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore'
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
-import { Maximize, Minimize, Shrink, Expand, Home, Printer, Volume2, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Maximize, Minimize, Shrink, Expand, Home, Printer, Volume2, ChevronLeft, ChevronRight, ZoomIn, X } from 'lucide-react'
 
 // Steps: 1(요일송), 2(날짜), 3(날씨), 4(급식안내), 5(드래그앤드롭), 6(활동지)
 export default function StudentActivity() {
@@ -381,20 +381,31 @@ function Activity3() {
 
 // 4. 오늘의 급식 알아보기
 function Activity4({ menus }) {
+  const [selectedMenu, setSelectedMenu] = useState(null);
+
   if (!menus) return <div className="text-2xl text-center mt-20">아직 선생님이 오늘의 메뉴를 등록하지 않았어요!</div>
 
   const menuItems = Object.values(menus).filter(m => m && m.name)
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center w-full min-h-full space-y-4 md:space-y-6 py-4">
+    <div className="flex-1 flex flex-col items-center justify-center w-full min-h-full space-y-4 md:space-y-6 py-4 relative">
       <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-gray-800 text-center shrink-0">🍽️ 오늘의 급식 메뉴</h2>
       
       <div className="flex-1 w-full max-w-7xl min-h-0 grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
         {menuItems.map((item, idx) => (
-          <div key={idx} className="bg-white rounded-[2rem] md:rounded-[3rem] shadow-lg border-[6px] md:border-8 border-pastel-yellow overflow-hidden flex flex-col items-center p-3 md:p-5 min-h-0">
+          <div key={idx} className="bg-white rounded-[2rem] md:rounded-[3rem] shadow-lg border-[6px] md:border-8 border-pastel-yellow overflow-hidden flex flex-col items-center p-3 md:p-5 min-h-0 relative group">
             <div className="w-full flex-1 bg-gray-50 rounded-[1.5rem] md:rounded-2xl overflow-hidden mb-3 md:mb-4 relative min-h-0 border-2 border-gray-100 shadow-inner">
               {item.imageUrl ? (
-                <img src={item.imageUrl} alt={item.name} className="object-cover w-full h-full" />
+                <>
+                  <img src={item.imageUrl} alt={item.name} className="object-cover w-full h-full" />
+                  <button 
+                    onClick={() => setSelectedMenu(item)}
+                    className="absolute top-2 right-2 bg-white/80 hover:bg-white text-gray-700 p-2 md:p-3 rounded-full shadow-md transition-all hover:scale-110 active:scale-95"
+                    title="크게 보기"
+                  >
+                    <ZoomIn className="w-6 h-6 md:w-8 md:h-8" />
+                  </button>
+                </>
               ) : (
                 <div className="flex items-center justify-center w-full h-full text-gray-400 text-xl font-bold">사진 없음</div>
               )}
@@ -403,6 +414,36 @@ function Activity4({ menus }) {
           </div>
         ))}
       </div>
+
+      {/* 이미지 팝업 모달 */}
+      {selectedMenu && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-3 md:p-6">
+          <div className="relative flex flex-col items-center justify-center mx-auto max-w-[96vw] max-h-[96vh]">
+            <div className="relative rounded-3xl md:rounded-[2.5rem] shadow-2xl bg-white border-8 md:border-[12px] border-white flex items-center justify-center">
+              <img 
+                src={selectedMenu.imageUrl} 
+                alt={selectedMenu.name} 
+                className="h-[70vh] md:h-[78vh] w-auto max-w-[90vw] object-contain rounded-2xl"
+              />
+              <button 
+                onClick={() => setSelectedMenu(null)}
+                style={{ WebkitTapHighlightColor: 'transparent' }}
+                className="absolute -top-4 -right-4 md:-top-5 md:-right-5 bg-white hover:bg-red-500 text-gray-900 hover:text-white p-2.5 md:p-3.5 rounded-full transition-all duration-200 shadow-2xl hover:scale-110 active:scale-95 z-50 border-[3px] border-gray-800 hover:border-red-600 ring-4 ring-black/20 focus:outline-none"
+                title="닫기"
+              >
+                <X className="w-7 h-7 md:w-9 md:h-9 stroke-[3]" />
+              </button>
+            </div>
+
+            {/* 하단 메뉴 이름 표기 */}
+            <div className="mt-3 md:mt-4 bg-white/95 backdrop-blur-md px-8 py-2 md:px-12 md:py-3 rounded-full shadow-2xl border-4 border-pastel-yellow flex items-center justify-center">
+              <span className="text-2xl md:text-4xl font-black text-gray-800 tracking-wide">
+                {selectedMenu.name}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

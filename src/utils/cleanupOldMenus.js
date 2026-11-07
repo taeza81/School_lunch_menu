@@ -1,99 +1,88 @@
+import { collection, getDocs, deleteDoc, doc, writeBatch } from 'firebase/firestore';
+import { db } from '../firebase';
+
 /**
- * Firestore 무료 1GB 용량 영구 유지를 위한 오래된 식단 데이터 자동 정리(Cleanup/TTL) 유틸리티
+ * [방안 A] 용량 자동 안심 관리 (Cleanup / TTL)
+ * Firebase 무료 1GB 영구 유지를 위한 30일 이전 식단 백그라운드 자동 정리
  * 
- * - 학교 기본 정보나 최근 45일(약 1.5개월)간의 최신 식단 데이터는 안전하게 보존됩니다.
- * - 45일 이전의 지난 식단 문서만 백그라운드에서 자동 삭제하여 Spark(무료) 플랜 용량을 영구히 초과하지 않도록 관리합니다.
- */
-import { collection, getDocs, deleteDoc } from 'firebase/firestore';
-
-/**
- * 45일 이전의 지난 식단 데이터를 백그라운드에서 안전하게 자동 정리
- * @param {object} db - Firestore db 인스턴스
  * @param {string} schoolCode - 학교 식별 코드
- * @param {number} daysToKeep - 보관할 일수 (기본 45일)
- * @returns {Promise<number>} 삭제된 오래된 문서 개수
+ * @param {number} maxAgeDays - 보관 일수 (기본값: 30일, 약 한 달)
+ * @param {boolean} force - 하루 1회 제한 무시 여부
+ * @returns {Promise<{ success: boolean, deletedCount: number, cutoffDate: string }>}
  */
-export async function cleanupOldMenus(db, schoolCode, daysToKeep = 45) {
-  if (!db || !schoolCode) return 0;
+export async function cleanupOldMenus(schoolCode, maxAgeDays = 30, force = false) {
+  if (!schoolCode) return { success: false, deletedCount: 0, cutoffDate: '' };
 
-  // 로컬 테스트 모드면 로컬스토리지 정리
-  if (localStorage.getItem('useLocalMock') === 'true') {
-    return cleanupLocalMockStorage(schoolCode, daysToKeep);
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
+  const lastCleanupKey = `last_cleanup_${schoolCode}`;
+  const lastCleanupDate = localStorage.getItem(lastCleanupKey);
+
+  // 하루에 1회만 백그라운드 자동 실행하여 불필요한 Firestore 읽기/쓰기 쿼터를 절약
+  if (!force && lastCleanupDate === todayStr) {
+    return { success: true, deletedCount: 0, cutoffDate: '', skipped: true };
   }
 
-  try {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - daysToKeep);
-    const pad = n => n.toString().padStart(2, '0');
-    const cutoffStr = `${cutoff.getFullYear()}-${pad(cutoff.getMonth() + 1)}-${pad(cutoff.getDate())}`;
+  // 30일 전 날짜 계산 (YYYY-MM-DD)
+  const cutoffTime = now.getTime() - (maxAgeDays * 24 * 60 * 60 * 1000);
+  const cutoffDateObj = new Date(cutoffTime);
+  const pad = (n) => n.toString().padStart(2, '0');
+  const cutoffDate = `${cutoffDateObj.getFullYear()}-${pad(cutoffDateObj.getMonth() + 1)}-${pad(cutoffDateObj.getDate())}`;
 
-    // schools/{schoolCode}/menus 컬렉션만 확인 (학교 메타 정보는 일체 건드리지 않음)
+  let deletedCount = 0;
+
+  try {
+    // 1. 브라우저 localStorage 내 30일 이전 캐시 정리
+    try {
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(`menus_${schoolCode}_`)) {
+          const datePart = key.replace(`menus_${schoolCode}_`, '');
+          // datePart가 YYYY-MM-DD 형식일 때 cutoffDate보다 이전인 경우
+          if (/^\d{4}-\d{2}-\d{2}$/.test(datePart) && datePart < cutoffDate) {
+            keysToRemove.push(key);
+          }
+        }
+      }
+      keysToRemove.forEach((k) => localStorage.removeItem(k));
+    } catch (e) {
+      console.warn('[Cleanup] 로컬 스토리지 정리 중 경고:', e);
+    }
+
+    // 로컬 모드일 때는 Firestore 쿼리 생략
+    if (localStorage.getItem('useLocalMock') === 'true') {
+      localStorage.setItem(lastCleanupKey, todayStr);
+      return { success: true, deletedCount: 0, cutoffDate };
+    }
+
+    // 2. Firestore 내 30일 이전 식단 문서 정리
     const menusColRef = collection(db, 'schools', schoolCode, 'menus');
     const snapshot = await getDocs(menusColRef);
 
-    let deletedCount = 0;
-    const deletePromises = [];
-
-    snapshot.forEach((menuDoc) => {
-      const docId = menuDoc.id; // YYYY-MM-DD 형식
-      // 날짜 형식 문서 중 45일 이전 문서만 선별 삭제
-      if (/^\d{4}-\d{2}-\d{2}$/.test(docId) && docId < cutoffStr) {
-        deletePromises.push(
-          deleteDoc(menuDoc.ref).then(() => {
-            deletedCount++;
-          })
-        );
+    const expiredDocs = [];
+    snapshot.forEach((docSnap) => {
+      const docId = docSnap.id; // YYYY-MM-DD
+      if (/^\d{4}-\d{2}-\d{2}$/.test(docId) && docId < cutoffDate) {
+        expiredDocs.push(docSnap.ref);
       }
     });
 
-    if (deletePromises.length > 0) {
-      await Promise.all(deletePromises);
-      console.log(`[용량 안심 관리] ${schoolCode}: 45일 이전 식단 문서 ${deletedCount}개를 자동 정리하여 무료 용량을 확보했습니다.`);
+    if (expiredDocs.length > 0) {
+      // batch를 이용해 한 번에 삭제 (최대 500개)
+      const batch = writeBatch(db);
+      expiredDocs.slice(0, 450).forEach((ref) => {
+        batch.delete(ref);
+      });
+      await batch.commit();
+      deletedCount = Math.min(expiredDocs.length, 450);
+      console.log(`[Cleanup] 30일 이전 식단 문서 ${deletedCount}개 정리 완료 (기준일: ${cutoffDate})`);
     }
 
-    return deletedCount;
-  } catch (error) {
-    // 백그라운드 정리 작업이므로 메인 사용자 경험을 방해하지 않도록 콘솔 로그만 남김
-    console.warn("[용량 안심 관리] 오래된 식단 정리 중 알림 (무시 가능):", error);
-    return 0;
+    localStorage.setItem(lastCleanupKey, todayStr);
+    return { success: true, deletedCount, cutoffDate };
+  } catch (err) {
+    console.error('[Cleanup] 자동 정리 실패:', err);
+    return { success: false, deletedCount, cutoffDate, error: err.message };
   }
-}
-
-/**
- * 로컬스토리지 모드용 오래된 키 정리
- */
-function cleanupLocalMockStorage(schoolCode, daysToKeep) {
-  try {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - daysToKeep);
-    const pad = n => n.toString().padStart(2, '0');
-    const cutoffStr = `${cutoff.getFullYear()}-${pad(cutoff.getMonth() + 1)}-${pad(cutoff.getDate())}`;
-
-    const prefix = `menus_${schoolCode}_`;
-    const keysToRemove = [];
-
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith(prefix)) {
-        const datePart = key.slice(prefix.length);
-        if (/^\d{4}-\d{2}-\d{2}$/.test(datePart) && datePart < cutoffStr) {
-          keysToRemove.push(key);
-        }
-      }
-    }
-
-    keysToRemove.forEach(k => localStorage.removeItem(k));
-    return keysToRemove.length;
-  } catch (e) {
-    return 0;
-  }
-}
-
-/**
- * Firebase Console TTL 정책 호환용 만료 일시 반환 (60일 후)
- */
-export function getExpiryTimestamp(days = 60) {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d;
 }

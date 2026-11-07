@@ -3,8 +3,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import { db } from '../firebase'
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore'
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
-import { Maximize, Minimize, Shrink, Expand, Home, Printer, Volume2, ChevronLeft, ChevronRight, ZoomIn, X } from 'lucide-react'
-import { fetchNeisMeal } from '../utils/neisApi'
+import { Maximize, Minimize, Shrink, Expand, Home, Printer, Volume2, ChevronLeft, ChevronRight, ZoomIn, X, Search } from 'lucide-react'
+import { fetchNeisMealMenu, resolveNeisSchoolFromLegacyCode, searchNeisSchools } from '../utils/neisApi'
 
 // Steps: 1(요일송), 2(날짜), 3(날씨), 4(급식안내), 5(드래그앤드롭), 6(활동지)
 export default function StudentActivity() {
@@ -14,8 +14,12 @@ export default function StudentActivity() {
   const [menus, setMenus] = useState(null)
   const [isMiniMode, setIsMiniMode] = useState(false)
   const [isFullScreen, setIsFullScreen] = useState(false)
+  const [isNeisFallback, setIsNeisFallback] = useState(false)
+  const [neisInfo, setNeisInfo] = useState(null)
+  const [isLoadingMenu, setIsLoadingMenu] = useState(false)
+  const [showSchoolModal, setShowSchoolModal] = useState(false)
 
-  const schoolCode = localStorage.getItem('schoolCode')
+  const [schoolCode, setSchoolCode] = useState(localStorage.getItem('schoolCode') || '')
 
   useEffect(() => {
     // 컴포넌트 마운트 시 현재 전체화면 상태 동기화 (홈 이동 후 돌아왔을 때 대비)
@@ -49,73 +53,77 @@ export default function StudentActivity() {
     const fetchMenu = async () => {
       // 날짜가 바뀌면 이전 데이터를 먼저 초기화!
       setMenus(null)
+      setIsNeisFallback(false)
+      setNeisInfo(null)
 
       const pad = n => n.toString().padStart(2, '0')
-      // 로컬 시간 기준으로 yyyy-mm-dd 생성 (toISOString()은 UTC 기준이라 하루 전으로 나올 수 있음)
+      // 로컬 시간 기준으로 yyyy-mm-dd 생성
       const dateStr = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
       const isMock = localStorage.getItem('useLocalMock') === 'true'
       
       if (!schoolCode) return;
 
-      let schoolInfo = null
-      try {
-        schoolInfo = JSON.parse(localStorage.getItem('schoolInfo'))
-      } catch (e) {}
-
-      // 나이스 폴백 헬퍼
-      const tryFetchNeisFallback = async () => {
-        if (schoolInfo?.atptCode && schoolInfo?.neisCode) {
-          try {
-            const res = await fetchNeisMeal(schoolInfo.atptCode, schoolInfo.neisCode, dateStr)
-            if (res.success && res.parsedMenus) {
-              const p = res.parsedMenus
-              setMenus({
-                rice: { name: p.rice || '', imageUrl: '', type: 'rice' },
-                soup: { name: p.soup || '', imageUrl: '', type: 'soup' },
-                side1: { name: p.side1 || '', imageUrl: '', type: 'side1' },
-                side2: { name: p.side2 || '', imageUrl: '', type: 'side2' },
-                side3: { name: p.side3 || '', imageUrl: '', type: 'side3' },
-                side4: { name: p.side4 || '', imageUrl: '', type: 'side4' },
-              })
-              return true
-            }
-          } catch (err) {
-            console.warn("나이스 급식 자동 fallback 실패:", err)
-          }
-        }
-        return false
-      }
+      setIsLoadingMenu(true)
+      let firebaseMenu = null
 
       try {
         if (isMock) {
           const localData = localStorage.getItem(`menus_${schoolCode}_${dateStr}`)
           if (localData) {
-            setMenus(JSON.parse(localData))
-          } else {
-            const ok = await tryFetchNeisFallback()
-            if (!ok) setMenus(null)
+            firebaseMenu = JSON.parse(localData)
           }
-          return
-        }
-        
-        const docRef = doc(db, 'schools', schoolCode, 'menus', dateStr)
-        const docSnap = await getDoc(docRef)
-        if (docSnap.exists() && docSnap.data().menus) {
-          setMenus(docSnap.data().menus)
         } else {
-          // Firestore에 메뉴가 등록되지 않은 경우 나이스에서 실시간 급식 조회
-          const ok = await tryFetchNeisFallback()
-          if (!ok) setMenus(null)
+          const docRef = doc(db, 'schools', schoolCode, 'menus', dateStr)
+          const docSnap = await getDoc(docRef)
+          if (docSnap.exists()) {
+            firebaseMenu = docSnap.data().menus
+          }
         }
       } catch (error) {
         console.error(error)
         const localData = localStorage.getItem(`menus_${schoolCode}_${dateStr}`)
-        if (localData) {
-          setMenus(JSON.parse(localData))
-        } else {
-          const ok = await tryFetchNeisFallback()
-          if (!ok) setMenus(null)
+        if (localData) firebaseMenu = JSON.parse(localData)
+      }
+
+      // 1. Firebase에 유효한 메뉴가 저장되어 있다면 우선 적용
+      const hasValidFirebaseMenu = firebaseMenu && Object.values(firebaseMenu).some(m => m && m.name && m.name.trim().length > 0)
+      if (hasValidFirebaseMenu) {
+        setMenus(firebaseMenu)
+        setIsLoadingMenu(false)
+        return
+      }
+
+      // 2. 🌟 [나이스 공공 급식 자동 fallback 지원] 🌟
+      // Firebase에 식단이 등록되지 않은 경우 교육부 나이스 API에서 실시간 자동 로드
+      try {
+        let officeCode = localStorage.getItem(`neis_office_${schoolCode}`) || localStorage.getItem('neisOfficeCode')
+        let neisCode = localStorage.getItem(`neis_school_${schoolCode}`) || localStorage.getItem('neisSchoolCode')
+
+        if (!officeCode || !neisCode) {
+          const resolved = await resolveNeisSchoolFromLegacyCode(schoolCode)
+          if (resolved) {
+            officeCode = resolved.officeCode
+            neisCode = resolved.schoolCode
+          }
         }
+
+        if (officeCode && neisCode) {
+          const neisData = await fetchNeisMealMenu(officeCode, neisCode, dateStr)
+          if (neisData && neisData.menus && neisData.dishList.length > 0) {
+            setMenus(neisData.menus)
+            setIsNeisFallback(true)
+            setNeisInfo(neisData)
+          } else {
+            setMenus(null)
+          }
+        } else {
+          setMenus(null)
+        }
+      } catch (neisErr) {
+        console.warn("나이스 급식 자동 Fallback 로드 중 알림:", neisErr)
+        setMenus(null)
+      } finally {
+        setIsLoadingMenu(false)
       }
     }
     fetchMenu()
@@ -131,7 +139,25 @@ export default function StudentActivity() {
           <div className="w-10 h-10 md:w-12 md:h-12 rounded-full overflow-hidden shadow-sm border-2 border-white shrink-0 bg-white">
             <img src={`${import.meta.env.BASE_URL}student_icon.jpg`} alt="학생" className="w-full h-full object-cover" />
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-800">오늘의 급식 활동</h1>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl md:text-3xl font-bold text-gray-800">오늘의 급식 활동</h1>
+              {isNeisFallback && (
+                <span className="hidden sm:inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold px-2.5 py-0.5 rounded-full shadow-sm animate-fade-in">
+                  <span>🏫</span> 나이스(NEIS) 자동 연동
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-gray-600 font-bold flex items-center gap-1.5 mt-0.5">
+              <span>🏫 {schoolCode ? schoolCode : '학교를 선택해주세요'}</span>
+              <button 
+                onClick={() => setShowSchoolModal(true)} 
+                className="text-blue-600 hover:text-blue-800 underline cursor-pointer font-bold"
+              >
+                [학교 변경]
+              </button>
+            </p>
+          </div>
         </div>
         <div className="flex gap-2 md:gap-4">
           <button 
@@ -139,14 +165,14 @@ export default function StudentActivity() {
               if (isFullScreen) enterWindowMode()
               navigate('/')
             }}
-            className="flex items-center gap-2 bg-white/80 hover:bg-white text-gray-700 font-bold px-4 py-2 rounded-xl transition-colors shadow-sm"
+            className="flex items-center gap-2 bg-white/80 hover:bg-white text-gray-700 font-bold px-4 py-2 rounded-xl transition-colors shadow-sm cursor-pointer"
           >
             <Home size={20} /> 홈
           </button>
 
           <button 
             onClick={isFullScreen ? enterWindowMode : enterFullScreen}
-            className="flex items-center gap-2 bg-white/80 hover:bg-white text-gray-700 font-bold px-4 py-2 rounded-xl transition-colors shadow-sm"
+            className="flex items-center gap-2 bg-white/80 hover:bg-white text-gray-700 font-bold px-4 py-2 rounded-xl transition-colors shadow-sm cursor-pointer"
           >
             {isFullScreen ? <><Minimize size={20} /> 창 모드</> : <><Maximize size={20} /> 전체 화면</>}
           </button>
@@ -154,7 +180,7 @@ export default function StudentActivity() {
           {isFullScreen && (
             <button 
               onClick={() => setIsMiniMode(!isMiniMode)}
-              className="flex items-center gap-2 bg-white/80 hover:bg-white text-gray-700 font-bold px-4 py-2 rounded-xl transition-colors shadow-sm"
+              className="flex items-center gap-2 bg-white/80 hover:bg-white text-gray-700 font-bold px-4 py-2 rounded-xl transition-colors shadow-sm cursor-pointer"
             >
               {isMiniMode ? <><Expand size={20} /> 화면 확대</> : <><Shrink size={20} /> 화면 축소</>}
             </button>
@@ -166,11 +192,11 @@ export default function StudentActivity() {
         
         {/* 콘텐츠 영역 */}
         <div className={`flex-1 flex flex-col p-4 md:p-8 print:p-0 print:overflow-visible ${[0, 2, 3, 4, 5].includes(step) ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-          {step === 0 && <Activity0 date={date} onSelectDate={(d) => { setDate(d); setStep(1); }} />}
+          {step === 0 && <Activity0 date={date} onSelectDate={(d) => { setDate(d); setStep(1); }} onOpenSchoolModal={() => setShowSchoolModal(true)} schoolCode={schoolCode} />}
           {step === 1 && <Activity1 />}
           {step === 2 && <Activity2 date={date} />}
           {step === 3 && <Activity3 />}
-          {step === 4 && <Activity4 menus={menus} />}
+          {step === 4 && <Activity4 menus={menus} isNeisFallback={isNeisFallback} neisInfo={neisInfo} isLoading={isLoadingMenu} />}
           {step === 5 && <Activity5 menus={menus} isMiniMode={isMiniMode} />}
           {step === 6 && <Activity6 menus={menus} />}
           {step === 7 && <Activity7 menus={menus} />}
@@ -203,9 +229,29 @@ export default function StudentActivity() {
           </div>
         )}
       </div>
+
+      {/* 학생 화면용 전국 학교 검색 모달 */}
+      {showSchoolModal && (
+        <StudentSchoolSearchModal
+          onSelect={(selected) => {
+            const code = `${selected.region}_${selected.schoolName.replace(/\s+/g, '')}`
+            localStorage.setItem('schoolCode', code)
+            localStorage.setItem(`neis_office_${code}`, selected.officeCode)
+            localStorage.setItem(`neis_school_${code}`, selected.schoolCode)
+            localStorage.setItem(`neis_name_${code}`, selected.schoolName)
+            localStorage.setItem(`neis_region_${code}`, selected.region)
+            localStorage.setItem('neisOfficeCode', selected.officeCode)
+            localStorage.setItem('neisSchoolCode', selected.schoolCode)
+            setSchoolCode(code)
+            setShowSchoolModal(false)
+          }}
+          onClose={() => setShowSchoolModal(false)}
+        />
+      )}
     </div>
   )
 }
+
 
 // 1. 요일송
 function Activity1() {
@@ -414,16 +460,46 @@ function Activity3() {
 }
 
 // 4. 오늘의 급식 알아보기
-function Activity4({ menus }) {
-  const [selectedMenu, setSelectedMenu] = useState(null);
+function Activity4({ menus, isNeisFallback, neisInfo, isLoading }) {
+  const [selectedMenu, setSelectedMenu] = useState(null)
 
-  if (!menus) return <div className="text-2xl text-center mt-20">아직 선생님이 오늘의 메뉴를 등록하지 않았어요!</div>
+  if (isLoading) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+        <div className="animate-spin text-5xl mb-4">⏳</div>
+        <h3 className="text-2xl font-bold text-gray-800">급식 식단을 불러오고 있습니다...</h3>
+      </div>
+    )
+  }
+
+  if (!menus) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+        <div className="bg-yellow-50 border-4 border-pastel-yellow p-8 md:p-12 rounded-[2.5rem] max-w-lg shadow-xl">
+          <span className="text-6xl mb-4 block">🍱</span>
+          <h3 className="text-2xl md:text-3xl font-extrabold text-gray-800 mb-3">급식 식단이 없습니다</h3>
+          <p className="text-gray-600 font-medium text-base leading-relaxed">
+            선생님이 등록한 메뉴나 나이스(NEIS) 공공 급식 식단이 없습니다.<br/>
+            (주말, 공휴일, 방학이거나 상단 [학교 변경]에서 학교를 확인해주세요)
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   const menuItems = Object.values(menus).filter(m => m && m.name)
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center w-full min-h-full space-y-4 md:space-y-6 py-4 relative">
-      <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-gray-800 text-center shrink-0">🍽️ 오늘의 급식 메뉴</h2>
+    <div className="flex-1 flex flex-col items-center justify-center w-full min-h-full space-y-3 md:space-y-4 py-2 relative">
+      <div className="flex flex-col items-center gap-1.5 shrink-0">
+        <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-gray-800 text-center">🍽️ 오늘의 급식 메뉴</h2>
+        {isNeisFallback && (
+          <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 px-4 py-1 rounded-full text-xs md:text-sm font-bold flex items-center gap-2 shadow-sm animate-fade-in">
+            <span>🏫</span>
+            <span>교육부 나이스(NEIS) 공공 급식 자동 연동 식단 {neisInfo?.calInfo ? `· 열량 ${neisInfo.calInfo}` : ''}</span>
+          </div>
+        )}
+      </div>
       
       <div className="flex-1 w-full max-w-7xl min-h-0 grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
         {menuItems.map((item, idx) => (
@@ -434,7 +510,7 @@ function Activity4({ menus }) {
                   <img src={item.imageUrl} alt={item.name} className="object-cover w-full h-full" />
                   <button 
                     onClick={() => setSelectedMenu(item)}
-                    className="absolute top-2 right-2 bg-white/80 hover:bg-white text-gray-700 p-2 md:p-3 rounded-full shadow-md transition-all hover:scale-110 active:scale-95"
+                    className="absolute top-2 right-2 bg-white/80 hover:bg-white text-gray-700 p-2 md:p-3 rounded-full shadow-md transition-all hover:scale-110 active:scale-95 cursor-pointer"
                     title="크게 보기"
                   >
                     <ZoomIn className="w-6 h-6 md:w-8 md:h-8" />
@@ -462,7 +538,7 @@ function Activity4({ menus }) {
               <button 
                 onClick={() => setSelectedMenu(null)}
                 style={{ WebkitTapHighlightColor: 'transparent' }}
-                className="absolute -top-4 -right-4 md:-top-5 md:-right-5 bg-white hover:bg-red-500 text-gray-900 hover:text-white p-2.5 md:p-3.5 rounded-full transition-all duration-200 shadow-2xl hover:scale-110 active:scale-95 z-50 border-[3px] border-gray-800 hover:border-red-600 ring-4 ring-black/20 focus:outline-none"
+                className="absolute -top-4 -right-4 md:-top-5 md:-right-5 bg-white hover:bg-red-500 text-gray-900 hover:text-white p-2.5 md:p-3.5 rounded-full transition-all duration-200 shadow-2xl hover:scale-110 active:scale-95 z-50 border-[3px] border-gray-800 hover:border-red-600 ring-4 ring-black/20 focus:outline-none cursor-pointer"
                 title="닫기"
               >
                 <X className="w-7 h-7 md:w-9 md:h-9 stroke-[3]" />
@@ -863,7 +939,7 @@ function Activity7({ menus }) {
 
 
 // 0. 날짜 선택 캘린더
-function Activity0({ date, onSelectDate }) {
+function Activity0({ date, onSelectDate, onOpenSchoolModal, schoolCode }) {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [savedDates, setSavedDates] = useState([])
 
@@ -874,7 +950,6 @@ function Activity0({ date, onSelectDate }) {
   const firstDay = new Date(year, month, 1).getDay()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
 
-  const schoolCode = localStorage.getItem('schoolCode')
   const isMock = localStorage.getItem('useLocalMock') === 'true'
 
   useEffect(() => {
@@ -888,7 +963,7 @@ function Activity0({ date, onSelectDate }) {
         } else {
           for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
-            if (key.startsWith(`menus_${schoolCode}_`)) {
+            if (key && key.startsWith(`menus_${schoolCode}_`)) {
               dates.push(key.replace(`menus_${schoolCode}_`, ''));
             }
           }
@@ -896,13 +971,6 @@ function Activity0({ date, onSelectDate }) {
         setSavedDates(dates);
       } catch (e) {
         console.error("Failed to load saved dates", e);
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key.startsWith(`menus_${schoolCode}_`)) {
-            dates.push(key.replace(`menus_${schoolCode}_`, ''));
-          }
-        }
-        setSavedDates(dates);
       }
     }
     fetchDates();
@@ -919,19 +987,36 @@ function Activity0({ date, onSelectDate }) {
   const todayDate = new Date()
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center w-full min-h-0 space-y-4 md:space-y-6 py-2">
-      <h2 className="text-3xl md:text-5xl font-bold text-gray-800 text-center shrink-0">활동 날짜를 선택해주세요</h2>
+    <div className="flex-1 flex flex-col items-center justify-center w-full min-h-0 space-y-3 md:space-y-4 py-2">
+      <div className="flex flex-col items-center gap-1 shrink-0">
+        <h2 className="text-3xl md:text-5xl font-bold text-gray-800 text-center">활동 날짜를 선택해주세요</h2>
+        <div className="flex items-center gap-2 text-xs md:text-sm text-gray-600 font-bold bg-white/70 px-4 py-1.5 rounded-full shadow-sm">
+          <span>💡 파란 점은 선생님 등록 식단이며, 없는 날짜도 <b>나이스(NEIS) 공공 급식이 자동 연동</b>됩니다.</span>
+        </div>
+      </div>
+
+      {!schoolCode && (
+        <div className="bg-amber-50 border-2 border-amber-300 text-amber-900 px-6 py-3 rounded-2xl font-bold text-sm md:text-base flex items-center justify-between gap-4 shadow-md w-full max-w-4xl">
+          <span>🏫 아직 학교가 설정되지 않았습니다. 우리 학교를 먼저 선택해 주세요!</span>
+          <button 
+            onClick={onOpenSchoolModal}
+            className="bg-emerald-500 hover:bg-emerald-600 text-white font-black px-4 py-1.5 rounded-xl text-sm shadow-sm transition-colors cursor-pointer shrink-0"
+          >
+            학교 선택하기
+          </button>
+        </div>
+      )}
       
-      <div className="w-full max-w-4xl bg-white rounded-3xl shadow-xl border-4 border-pastel-yellow p-4 md:p-8 flex flex-col min-h-0 flex-1 mb-4">
+      <div className="w-full max-w-4xl bg-white rounded-3xl shadow-xl border-4 border-pastel-yellow p-4 md:p-8 flex flex-col min-h-0 flex-1 mb-2">
         {/* Calendar Header */}
         <div className="flex justify-between items-center mb-4 md:mb-6 shrink-0">
-          <button onClick={prevMonth} className="p-2 md:p-3 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors">
+          <button onClick={prevMonth} className="p-2 md:p-3 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors cursor-pointer">
             <ChevronLeft size={32} className="text-gray-700" />
           </button>
           <h3 className="text-2xl md:text-4xl font-bold text-gray-800">
             {year}년 {month + 1}월
           </h3>
-          <button onClick={nextMonth} className="p-2 md:p-3 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors">
+          <button onClick={nextMonth} className="p-2 md:p-3 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors cursor-pointer">
             <ChevronRight size={32} className="text-gray-700" />
           </button>
         </div>
@@ -961,7 +1046,7 @@ function Activity0({ date, onSelectDate }) {
                 key={dayNum}
                 onClick={() => onSelectDate(new Date(year, month, dayNum))}
                 className={`
-                  w-full h-full min-h-[50px] flex flex-col items-center justify-center rounded-xl md:rounded-2xl text-xl md:text-3xl font-bold transition-all relative
+                  w-full h-full min-h-[50px] flex flex-col items-center justify-center rounded-xl md:rounded-2xl text-xl md:text-3xl font-bold transition-all relative cursor-pointer
                   ${isToday 
                     ? 'bg-pastel-pink text-white ring-4 ring-pastel-pink/30' 
                     : (hasMenu 
@@ -977,6 +1062,92 @@ function Activity0({ date, onSelectDate }) {
               </button>
             )
           })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StudentSchoolSearchModal({ onSelect, onClose }) {
+  const [keyword, setKeyword] = useState('')
+  const [results, setResults] = useState([])
+  const [isSearching, setIsSearching] = useState(false)
+
+  const handleSearch = async (e) => {
+    if (e) e.preventDefault()
+    if (!keyword.trim()) return alert("학교 이름을 2글자 이상 입력해주세요.")
+    setIsSearching(true)
+    try {
+      const list = await searchNeisSchools(keyword.trim())
+      setResults(list)
+      if (list.length === 0) {
+        alert("검색된 학교가 없습니다. 학교명을 다시 확인해주세요.")
+      }
+    } catch (err) {
+      alert("학교 검색 오류: " + err.message)
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-[2rem] p-6 md:p-8 max-w-xl w-full shadow-2xl flex flex-col max-h-[85vh] animate-fade-in">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-2xl md:text-3xl font-extrabold text-gray-800">🏫 우리 학교 선택하기</h2>
+            <p className="text-xs md:text-sm text-gray-500 mt-1">학교를 선택하면 오늘의 나이스 공공 급식 식단이 자동 연동됩니다.</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-2xl font-bold cursor-pointer">✕</button>
+        </div>
+
+        <form onSubmit={handleSearch} className="flex gap-2 mb-4">
+          <input 
+            type="text" 
+            placeholder="학교명 입력 (예: 은혜학교, 김해은혜)" 
+            className="flex-1 border-2 border-gray-200 p-3 rounded-2xl focus:outline-none focus:border-emerald-500 font-bold text-gray-800 text-base"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            autoFocus
+          />
+          <button 
+            type="submit" 
+            disabled={isSearching}
+            className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-3 rounded-2xl font-black text-base shadow-md transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            {isSearching ? '검색 중' : '검색'}
+          </button>
+        </form>
+
+        <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 border border-gray-100 p-2 rounded-2xl bg-gray-50">
+          {results.length === 0 ? (
+            <div className="text-center py-12 text-gray-400 font-medium text-sm">
+              학교명을 입력하고 [검색]을 눌러주세요.
+            </div>
+          ) : (
+            results.map((item) => (
+              <div 
+                key={`${item.officeCode}_${item.schoolCode}`}
+                className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm hover:border-emerald-400 hover:shadow-md transition-all flex items-center justify-between gap-3"
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-gray-900 text-base">{item.schoolName}</span>
+                    <span className="bg-emerald-50 text-emerald-700 text-[11px] font-bold px-2 py-0.5 rounded-md border border-emerald-200">
+                      {item.schoolKind}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">{item.region} · {item.address || item.officeName}</p>
+                </div>
+                <button 
+                  onClick={() => onSelect(item)}
+                  className="bg-pastel-pink hover:bg-pink-300 text-gray-800 font-black px-4 py-2 rounded-xl text-sm transition-colors shadow-sm shrink-0 cursor-pointer"
+                >
+                  선택하기
+                </button>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>

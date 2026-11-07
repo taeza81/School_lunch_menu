@@ -180,8 +180,8 @@ export default function StudentActivity() {
   const prevStep = () => setStep(s => Math.max(s - 1, 0))
 
   return (
-    <div className={`${isFullScreen ? 'h-screen overflow-hidden print:overflow-visible print:h-auto' : 'min-h-screen'} bg-pastel-green p-4 flex flex-col ${isMiniMode ? 'justify-end items-center pb-12' : ''} print:p-0 print:bg-white print:block`}>
-      <div className="flex justify-between items-center mb-4 no-print w-full max-w-[1600px] mx-auto shrink-0">
+    <div className={`${isFullScreen ? 'h-screen overflow-hidden print:overflow-visible print:h-auto' : 'min-h-screen'} bg-pastel-green p-3 md:p-4 flex flex-col ${isMiniMode ? 'justify-end items-center pb-2' : ''} print:p-0 print:bg-white print:block`}>
+      <div className="flex justify-between items-center mb-3 md:mb-4 no-print w-full max-w-[1600px] mx-auto shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 md:w-12 md:h-12 rounded-full overflow-hidden shadow-sm border-2 border-white shrink-0 bg-white">
             <img src={`${import.meta.env.BASE_URL}student_icon.jpg`} alt="학생" className="w-full h-full object-cover" />
@@ -235,10 +235,17 @@ export default function StudentActivity() {
         </div>
       </div>
       
-      <div className={`bg-white rounded-3xl shadow-xl overflow-hidden transition-transform duration-500 ease-in-out flex flex-col w-full max-w-[1600px] mx-auto flex-1 min-h-0 ${isMiniMode ? 'scale-[0.6] origin-bottom' : ''} print:transform-none print:overflow-visible print:shadow-none print:rounded-none print:block`}>
+      {/* 
+        🌟 [드래그 좌표 왜곡 방지 및 완벽한 축소 모드 구현] 🌟
+        CSS transform: scale(...)은 @hello-pangea/dnd의 마우스 이벤트(clientX/Y) 좌표계와 
+        배율 불일치를 일으켜 마우스 커서와 드래그 카드가 멀어지고 드롭 타겟 인식이 불가능해집니다.
+        따라서 scale 대신 순수 CSS 레이아웃(너비, 높이, 패딩)을 컴팩트하게 조절하여
+        1:1 마우스 좌표 일치 상태에서 완벽하게 부드러운 드래그 동작을 보장합니다.
+      */}
+      <div className={`bg-white rounded-3xl shadow-2xl overflow-hidden transition-all duration-300 ease-in-out flex flex-col w-full mx-auto print:transform-none print:overflow-visible print:shadow-none print:rounded-none print:block ${isMiniMode ? 'max-w-[1100px] h-[74vh] max-h-[740px] shrink-0 mb-1' : 'max-w-[1600px] flex-1 min-h-0'}`}>
         
         {/* 콘텐츠 영역 */}
-        <div className={`flex-1 flex flex-col p-4 md:p-8 print:p-0 print:overflow-visible ${[0, 2, 3, 4, 5].includes(step) ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+        <div className={`flex-1 flex flex-col print:p-0 print:overflow-visible ${isMiniMode ? 'p-3 md:p-4' : 'p-4 md:p-8'} ${[0, 2, 3, 4, 5].includes(step) ? 'overflow-hidden' : 'overflow-y-auto'}`}>
           {step === 0 && <Activity0 date={date} onSelectDate={(d) => { setDate(d); setStep(1); }} onOpenSchoolModal={() => setShowSchoolModal(true)} schoolCode={schoolCode} />}
           {step === 1 && <Activity1 />}
           {step === 2 && <Activity2 date={date} />}
@@ -251,25 +258,25 @@ export default function StudentActivity() {
 
         {/* 네비게이션 */}
         {step > 0 && (
-          <div className="bg-gray-50 p-4 border-t flex justify-between items-center no-print">
+          <div className={`bg-gray-50 border-t flex justify-between items-center no-print ${isMiniMode ? 'p-2.5 md:p-3' : 'p-4'}`}>
             <button 
               onClick={prevStep} 
               disabled={step === 0}
-              className="bg-pastel-blue px-6 py-3 rounded-2xl font-bold text-lg disabled:opacity-30 hover:bg-blue-300"
+              className={`bg-pastel-blue rounded-2xl font-bold disabled:opacity-30 hover:bg-blue-300 cursor-pointer ${isMiniMode ? 'px-4 py-2 text-base' : 'px-6 py-3 text-lg'}`}
             >
               이전
             </button>
             
             <div className="flex gap-2">
               {[1,2,3,4,5,6,7].map(i => (
-                <div key={i} className={`w-4 h-4 rounded-full ${step === i ? 'bg-pastel-pink' : 'bg-gray-300'}`} />
+                <div key={i} className={`rounded-full transition-all ${isMiniMode ? 'w-3 h-3' : 'w-4 h-4'} ${step === i ? 'bg-pastel-pink scale-110' : 'bg-gray-300'}`} />
               ))}
             </div>
 
             <button 
               onClick={nextStep} 
               disabled={step === 7}
-              className="bg-pastel-blue px-6 py-3 rounded-2xl font-bold text-lg disabled:opacity-30 hover:bg-blue-300"
+              className={`bg-pastel-blue rounded-2xl font-bold disabled:opacity-30 hover:bg-blue-300 cursor-pointer ${isMiniMode ? 'px-4 py-2 text-base' : 'px-6 py-3 text-lg'}`}
             >
               다음
             </button>
@@ -667,18 +674,25 @@ function Activity5({ menus, isMiniMode }) {
     setSelectedItem(null)
   }
 
-  const slotClass = "w-full h-full min-h-0 rounded-[2rem] border-4 border-orange-500 border-dashed flex items-center justify-center overflow-hidden bg-white/50"
+  const slotClass = `w-full h-full min-h-0 ${isMiniMode ? 'rounded-2xl border-2 md:border-3' : 'rounded-[2rem] border-4'} border-orange-500 border-dashed flex items-center justify-center overflow-hidden bg-white/50`
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center w-full min-h-full space-y-4 py-4">
-      <h2 className={`font-bold text-gray-800 text-center shrink-0 ${isMiniMode ? 'text-2xl' : 'text-4xl'}`}>🍱 알맞은 자리에 담아볼까요?</h2>
+    <div className={`flex-1 flex flex-col items-center justify-center w-full min-h-full ${isMiniMode ? 'space-y-2 py-1' : 'space-y-4 py-3'}`}>
+      <h2 className={`font-bold text-gray-800 text-center shrink-0 ${isMiniMode ? 'text-xl md:text-2xl' : 'text-3xl md:text-4xl'}`}>🍱 알맞은 자리에 담아볼까요?</h2>
       
       <DragDropContext onDragEnd={onDragEnd}>
-        <div className="flex flex-col gap-6 w-full max-w-[1500px] flex-1 min-h-0 items-center justify-between">
+        <div className={`flex flex-col w-full max-w-[1500px] flex-1 min-h-0 items-center justify-between ${isMiniMode ? 'gap-2 md:gap-3 py-1' : 'gap-4 md:gap-6 py-2'}`}>
           
           {/* 6구 식판 UI (화면 크기에 맞춰 동적으로 최대 크기 계산) */}
-          <div className="w-full mx-auto bg-yellow-50 rounded-[2rem] md:rounded-[3rem] p-4 md:p-6 shadow-inner relative flex gap-4 md:gap-6 aspect-video shrink-0" style={{ maxWidth: 'min(64rem, calc((100vh - 300px) * 16 / 9))' }}>
-            <div className="grid grid-cols-4 grid-rows-[1fr_1.4fr] gap-4 md:gap-6 flex-1 min-h-0">
+          <div 
+            className={`w-full mx-auto bg-yellow-50 rounded-[2rem] md:rounded-[3rem] shadow-inner relative flex aspect-video shrink-0 ${isMiniMode ? 'p-3 md:p-4 gap-3 md:gap-4' : 'p-4 md:p-6 gap-4 md:gap-6'}`} 
+            style={{ 
+              maxWidth: isMiniMode 
+                ? 'min(44rem, calc((74vh - 210px) * 16 / 9))' 
+                : 'min(64rem, calc((100vh - 300px) * 16 / 9))' 
+            }}
+          >
+            <div className={`grid grid-cols-4 grid-rows-[1fr_1.4fr] flex-1 min-h-0 ${isMiniMode ? 'gap-2.5 md:gap-4' : 'gap-4 md:gap-6'}`}>
               {/* 위쪽 줄: 반찬4개 */}
               <TraySlot id="side1" item={tray.side1} targetItem={menus?.side1} label="반찬 1" className={slotClass} onSlotClick={handleSlotClick} />
               <TraySlot id="side2" item={tray.side2} targetItem={menus?.side2} label="반찬 2" className={slotClass} onSlotClick={handleSlotClick} />
@@ -695,8 +709,8 @@ function Activity5({ menus, isMiniMode }) {
             </div>
 
             {/* 우측 수저통 영역 */}
-            <div className="w-16 md:w-24 shrink-0 flex flex-col h-full py-2">
-              <div className="w-full h-full rounded-[3rem] border-[6px] border-yellow-300 bg-yellow-50 flex items-center justify-center shadow-inner overflow-hidden relative">
+            <div className={`${isMiniMode ? 'w-12 md:w-16' : 'w-16 md:w-24'} shrink-0 flex flex-col h-full py-1 md:py-2`}>
+              <div className="w-full h-full rounded-[2rem] md:rounded-[3rem] border-4 md:border-[6px] border-yellow-300 bg-yellow-50 flex items-center justify-center shadow-inner overflow-hidden relative">
                 <img src={`${import.meta.env.BASE_URL}utensils_flat.jpg`} alt="수저 세트" className="w-full h-full object-contain opacity-70 mix-blend-multiply scale-[1.4] md:scale-[1.5] origin-center" />
               </div>
             </div>
@@ -708,14 +722,14 @@ function Activity5({ menus, isMiniMode }) {
               <div 
                 ref={provided.innerRef} 
                 {...provided.droppableProps}
-                className="w-full max-w-[1200px] bg-pastel-pink/30 p-3 md:p-4 rounded-[2rem] shrink-0 flex items-center justify-center gap-3 md:gap-4 overflow-x-auto min-h-[110px] md:min-h-[130px]"
+                className={`w-full max-w-[1200px] bg-pastel-pink/30 rounded-[1.5rem] md:rounded-[2rem] shrink-0 flex items-center justify-center gap-2 md:gap-4 overflow-x-auto ${isMiniMode ? 'p-2 min-h-[90px] md:min-h-[105px]' : 'p-3 md:p-4 min-h-[110px] md:min-h-[130px]'}`}
               >
                 {items.length === 0 ? (
                   <div className="flex flex-col md:flex-row items-center gap-4 animate-fade-in">
-                    <div className="text-gray-500 font-bold text-xl md:text-2xl">모두 담았어요! 👏</div>
+                    <div className="text-gray-500 font-bold text-lg md:text-2xl">모두 담았어요! 👏</div>
                     <button 
                       onClick={handleReset}
-                      className="bg-white text-gray-700 font-bold px-6 py-2 md:py-3 rounded-2xl shadow-sm border-2 border-gray-200 hover:border-pastel-blue hover:text-pastel-blue transition-colors flex items-center gap-2 text-base md:text-lg"
+                      className="bg-white text-gray-700 font-bold px-5 py-2 md:py-3 rounded-2xl shadow-sm border-2 border-gray-200 hover:border-pastel-blue hover:text-pastel-blue transition-colors flex items-center gap-2 text-sm md:text-base cursor-pointer"
                     >
                       다시 하기 🔄
                     </button>
@@ -729,17 +743,17 @@ function Activity5({ menus, isMiniMode }) {
                         ref={provided.innerRef}
                         {...provided.draggableProps}
                         {...provided.dragHandleProps}
-                        className={`w-24 h-24 md:w-32 md:h-32 bg-white rounded-[1.5rem] shadow-md border-[3px] border-white flex flex-col overflow-hidden shrink-0 cursor-pointer active:cursor-grabbing hover:scale-[1.02] transition-transform ${snapshot.isDragging ? 'shadow-2xl scale-110 z-50 ring-4 ring-pastel-blue' : ''} ${selectedItem?.id === item.id && !snapshot.isDragging ? 'ring-4 ring-pastel-pink scale-[1.05] shadow-xl z-40' : ''}`}
+                        className={`bg-white rounded-[1.2rem] md:rounded-[1.5rem] shadow-md border-2 md:border-[3px] border-white flex flex-col overflow-hidden shrink-0 cursor-pointer active:cursor-grabbing ${isMiniMode ? 'w-20 h-20 md:w-24 md:h-24' : 'w-24 h-24 md:w-32 md:h-32'} ${snapshot.isDragging ? 'shadow-2xl scale-105 z-50 ring-4 ring-pastel-blue transition-none' : 'hover:scale-[1.02] transition-transform'} ${selectedItem?.id === item.id && !snapshot.isDragging ? 'ring-4 ring-pastel-pink scale-[1.05] shadow-xl z-40' : ''}`}
                       >
                         <div className="w-full flex-1 bg-gray-50 overflow-hidden relative">
                           {item.imageUrl ? (
                             <img src={item.imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center text-gray-300 text-sm font-bold">사진 없음</div>
+                            <div className="w-full h-full flex items-center justify-center text-gray-300 text-xs md:text-sm font-bold">사진 없음</div>
                           )}
                         </div>
-                        <div className="w-full h-[30%] flex items-center justify-center bg-white border-t border-gray-100 px-2 shrink-0">
-                          <span className="font-bold text-sm md:text-lg text-gray-800 truncate text-center">{item.name}</span>
+                        <div className="w-full h-[30%] flex items-center justify-center bg-white border-t border-gray-100 px-1.5 md:px-2 shrink-0">
+                          <span className={`font-bold text-gray-800 truncate text-center ${isMiniMode ? 'text-xs md:text-sm' : 'text-sm md:text-lg'}`}>{item.name}</span>
                         </div>
                       </div>
                     )}

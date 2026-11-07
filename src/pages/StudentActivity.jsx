@@ -4,7 +4,7 @@ import { db } from '../firebase'
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore'
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
 import { Maximize, Minimize, Shrink, Expand, Home, Printer, Volume2, ChevronLeft, ChevronRight, ZoomIn, X, Search } from 'lucide-react'
-import { fetchNeisMealMenu, resolveNeisSchoolFromLegacyCode, searchNeisSchools } from '../utils/neisApi'
+import { fetchNeisMealMenu, resolveNeisSchoolFromLegacyCode, searchNeisSchools, normalizeRegion, normalizeSchoolCode, getAlternativeSchoolCodes } from '../utils/neisApi'
 
 // Steps: 1(요일송), 2(날짜), 3(날씨), 4(급식안내), 5(드래그앤드롭), 6(활동지)
 export default function StudentActivity() {
@@ -19,7 +19,21 @@ export default function StudentActivity() {
   const [isLoadingMenu, setIsLoadingMenu] = useState(false)
   const [showSchoolModal, setShowSchoolModal] = useState(false)
 
-  const [schoolCode, setSchoolCode] = useState(localStorage.getItem('schoolCode') || '')
+  const [schoolCode, setSchoolCode] = useState(() => {
+    let saved = localStorage.getItem('schoolCode') || ''
+    if (saved) {
+      saved = normalizeSchoolCode(saved)
+      localStorage.setItem('schoolCode', saved)
+    }
+    return saved
+  })
+
+  useEffect(() => {
+    // 최초 접속 시 학교가 설정되어 있지 않다면 학교 선택 모달 띄우기
+    if (!localStorage.getItem('schoolCode')) {
+      setShowSchoolModal(true)
+    }
+  }, [])
 
   useEffect(() => {
     // 컴포넌트 마운트 시 현재 전체화면 상태 동기화 (홈 이동 후 돌아왔을 때 대비)
@@ -61,27 +75,60 @@ export default function StudentActivity() {
       const dateStr = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
       const isMock = localStorage.getItem('useLocalMock') === 'true'
       
-      if (!schoolCode) return;
+      const activeCode = normalizeSchoolCode(schoolCode || localStorage.getItem('schoolCode'))
+      if (!activeCode) {
+        setIsLoadingMenu(false)
+        return
+      }
 
       setIsLoadingMenu(true)
       let firebaseMenu = null
 
       try {
         if (isMock) {
-          const localData = localStorage.getItem(`menus_${schoolCode}_${dateStr}`)
+          let localData = localStorage.getItem(`menus_${activeCode}_${dateStr}`)
+          if (!localData) {
+            const alts = getAlternativeSchoolCodes(activeCode)
+            for (const alt of alts) {
+              const d = localStorage.getItem(`menus_${alt}_${dateStr}`)
+              if (d) { localData = d; break; }
+            }
+          }
           if (localData) {
             firebaseMenu = JSON.parse(localData)
           }
         } else {
-          const docRef = doc(db, 'schools', schoolCode, 'menus', dateStr)
-          const docSnap = await getDoc(docRef)
+          const docRef = doc(db, 'schools', activeCode, 'menus', dateStr)
+          let docSnap = await getDoc(docRef)
+          
+          // 호환성 체크: 전남광주_ ↔ 전남_ / 광주_, 경남_ ↔ 경상남도_
+          if (!docSnap.exists()) {
+            const alts = getAlternativeSchoolCodes(activeCode)
+            for (const alt of alts) {
+              try {
+                const altSnap = await getDoc(doc(db, 'schools', alt, 'menus', dateStr))
+                if (altSnap.exists()) {
+                  docSnap = altSnap
+                  break
+                }
+              } catch (e) { /* ignore */ }
+            }
+          }
+
           if (docSnap.exists()) {
             firebaseMenu = docSnap.data().menus
           }
         }
       } catch (error) {
         console.error(error)
-        const localData = localStorage.getItem(`menus_${schoolCode}_${dateStr}`)
+        let localData = localStorage.getItem(`menus_${activeCode}_${dateStr}`)
+        if (!localData) {
+          const alts = getAlternativeSchoolCodes(activeCode)
+          for (const alt of alts) {
+            const d = localStorage.getItem(`menus_${alt}_${dateStr}`)
+            if (d) { localData = d; break; }
+          }
+        }
         if (localData) firebaseMenu = JSON.parse(localData)
       }
 
@@ -234,12 +281,13 @@ export default function StudentActivity() {
       {showSchoolModal && (
         <StudentSchoolSearchModal
           onSelect={(selected) => {
-            const code = `${selected.region}_${selected.schoolName.replace(/\s+/g, '')}`
+            const reg = normalizeRegion(selected.region, selected.officeCode) || '경남'
+            const code = normalizeSchoolCode(`${reg}_${selected.schoolName.replace(/\s+/g, '')}`)
             localStorage.setItem('schoolCode', code)
             localStorage.setItem(`neis_office_${code}`, selected.officeCode)
             localStorage.setItem(`neis_school_${code}`, selected.schoolCode)
             localStorage.setItem(`neis_name_${code}`, selected.schoolName)
-            localStorage.setItem(`neis_region_${code}`, selected.region)
+            localStorage.setItem(`neis_region_${code}`, reg)
             localStorage.setItem('neisOfficeCode', selected.officeCode)
             localStorage.setItem('neisSchoolCode', selected.schoolCode)
             setSchoolCode(code)
@@ -954,17 +1002,40 @@ function Activity0({ date, onSelectDate, onOpenSchoolModal, schoolCode }) {
 
   useEffect(() => {
     const fetchDates = async () => {
-      if (!schoolCode) return;
+      const activeCode = normalizeSchoolCode(schoolCode || localStorage.getItem('schoolCode'))
+      if (!activeCode) {
+        setSavedDates([])
+        return
+      }
       const dates = [];
       try {
         if (!isMock) {
-          const querySnapshot = await getDocs(collection(db, 'schools', schoolCode, 'menus'));
+          const querySnapshot = await getDocs(collection(db, 'schools', activeCode, 'menus'));
           querySnapshot.forEach(doc => dates.push(doc.id));
+
+          if (dates.length === 0) {
+            const alts = getAlternativeSchoolCodes(activeCode);
+            for (const alt of alts) {
+              try {
+                const altSnap = await getDocs(collection(db, 'schools', alt, 'menus'));
+                altSnap.forEach(d => {
+                  if (!dates.includes(d.id)) dates.push(d.id);
+                });
+                if (dates.length > 0) break;
+              } catch (e) { /* ignore */ }
+            }
+          }
         } else {
+          const checkCodes = [activeCode, ...getAlternativeSchoolCodes(activeCode)];
           for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
-            if (key && key.startsWith(`menus_${schoolCode}_`)) {
-              dates.push(key.replace(`menus_${schoolCode}_`, ''));
+            if (!key) continue;
+            for (const c of checkCodes) {
+              if (key.startsWith(`menus_${c}_`)) {
+                const parts = key.split('_');
+                const dStr = parts[parts.length - 1];
+                if (!dates.includes(dStr)) dates.push(dStr);
+              }
             }
           }
         }
@@ -1070,6 +1141,7 @@ function Activity0({ date, onSelectDate, onOpenSchoolModal, schoolCode }) {
 
 function StudentSchoolSearchModal({ onSelect, onClose }) {
   const [keyword, setKeyword] = useState('')
+  const [kindFilter, setKindFilter] = useState('전체')
   const [results, setResults] = useState([])
   const [isSearching, setIsSearching] = useState(false)
 
@@ -1078,10 +1150,10 @@ function StudentSchoolSearchModal({ onSelect, onClose }) {
     if (!keyword.trim()) return alert("학교 이름을 2글자 이상 입력해주세요.")
     setIsSearching(true)
     try {
-      const list = await searchNeisSchools(keyword.trim())
+      const list = await searchNeisSchools(keyword.trim(), '', kindFilter)
       setResults(list)
       if (list.length === 0) {
-        alert("검색된 학교가 없습니다. 학교명을 다시 확인해주세요.")
+        alert("검색된 학교가 없습니다. 학교명이나 학교 종류를 다시 확인해주세요.")
       }
     } catch (err) {
       alert("학교 검색 오류: " + err.message)
@@ -1094,18 +1166,47 @@ function StudentSchoolSearchModal({ onSelect, onClose }) {
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-[2rem] p-6 md:p-8 max-w-xl w-full shadow-2xl flex flex-col max-h-[85vh] animate-fade-in">
         <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-2xl md:text-3xl font-extrabold text-gray-800">🏫 우리 학교 선택하기</h2>
-            <p className="text-xs md:text-sm text-gray-500 mt-1">학교를 선택하면 오늘의 나이스 공공 급식 식단이 자동 연동됩니다.</p>
-          </div>
+          <h2 className="text-xl md:text-2xl font-extrabold text-gray-800">🏫 우리 학교 선택하기 (NEIS 연동)</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-2xl font-bold cursor-pointer">✕</button>
         </div>
 
-        <form onSubmit={handleSearch} className="flex gap-2 mb-4">
+        {/* 기존 김해은혜학교 1초 바로 선택 퀵 버튼 */}
+        <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between">
+          <div className="text-xs md:text-sm text-emerald-900 font-bold">
+            <span>🏫 김해은혜학교 학생이신가요?</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              onSelect({
+                region: '경남',
+                schoolName: '김해은혜학교',
+                officeCode: 'S10',
+                schoolCode: '9010536'
+              })
+            }}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs md:text-sm font-black px-3.5 py-1.5 rounded-xl shadow-sm transition-all cursor-pointer"
+          >
+            김해은혜학교 바로 선택
+          </button>
+        </div>
+
+        <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-2 mb-3">
+          <select 
+            value={kindFilter} 
+            onChange={(e) => setKindFilter(e.target.value)}
+            className="border-2 border-gray-200 p-2.5 rounded-xl font-bold text-gray-700 text-sm bg-white"
+          >
+            <option value="전체">학교급</option>
+            <option value="특수학교">특수학교</option>
+            <option value="초등학교">초등학교</option>
+            <option value="중학교">중학교</option>
+            <option value="고등학교">고등학교</option>
+          </select>
           <input 
             type="text" 
-            placeholder="학교명 입력 (예: 은혜학교, 김해은혜)" 
-            className="flex-1 border-2 border-gray-200 p-3 rounded-2xl focus:outline-none focus:border-emerald-500 font-bold text-gray-800 text-base"
+            placeholder="공식 학교명을 입력해 주세요." 
+            className="flex-1 border-2 border-gray-200 p-2.5 rounded-xl focus:outline-none focus:border-emerald-500 font-bold text-gray-800 text-sm"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             autoFocus
@@ -1113,16 +1214,16 @@ function StudentSchoolSearchModal({ onSelect, onClose }) {
           <button 
             type="submit" 
             disabled={isSearching}
-            className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-3 rounded-2xl font-black text-base shadow-md transition-colors disabled:opacity-50 cursor-pointer"
+            className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-black text-sm shadow-md transition-colors disabled:opacity-50 cursor-pointer shrink-0"
           >
             {isSearching ? '검색 중' : '검색'}
           </button>
         </form>
 
-        <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 border border-gray-100 p-2 rounded-2xl bg-gray-50">
+        <div className={`overflow-y-auto space-y-2 pr-1 border border-gray-100 p-2 rounded-2xl bg-gray-50 ${results.length === 0 ? 'py-4 text-center' : 'max-h-[360px]'}`}>
           {results.length === 0 ? (
-            <div className="text-center py-12 text-gray-400 font-medium text-sm">
-              학교명을 입력하고 [검색]을 눌러주세요.
+            <div className="text-gray-400 font-medium text-xs md:text-sm">
+              학교명을 입력하고 [검색] 버튼을 눌러주세요.
             </div>
           ) : (
             results.map((item) => (

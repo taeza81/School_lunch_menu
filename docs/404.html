@@ -1,23 +1,39 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
   <head>
-    <meta charset="utf-8">
+    <meta charset="UTF-8" />
+    <!-- 브라우저 캐시 방지: 교사/학생 누구나 접속 시 즉시 최신 웹페이지 자동 로드 -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    
+    <link rel="icon" type="image/jpeg" href="/School_lunch_menu/favicon.jpg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>오늘의 급식 메뉴</title>
-    <!-- GitHub Pages SPA 404 리다이렉트 스크립트 -->
+    <!-- 오픈 그래프 (카카오톡, 페이스북 등 공유 썸네일) -->
+    <meta property="og:title" content="오늘의 급식 메뉴" />
+    <meta property="og:description" content="우리반의 맛있는 급식 메뉴를 확인하고 다양한 급식 활동을 함께해요!" />
+    <meta property="og:image" content="https://taeza81.github.io/School_lunch_menu/favicon.jpg" />
+    <meta property="og:url" content="https://taeza81.github.io/School_lunch_menu/" />
+    <meta property="og:type" content="website" />
+    
+    <!-- GitHub Pages SPA 라우팅 복원 스크립트 (새로고침 F5 404 방지) -->
     <script type="text/javascript">
-      // GitHub Pages에서 /teacher, /student 등의 하위 경로에서 F5 새로고침 시 404 방지
-      var pathSegmentsToKeep = 1;
-
-      var l = window.location;
-      l.replace(
-        l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
-        l.pathname.split('/').slice(0, 1 + pathSegmentsToKeep).join('/') + '/?/' +
-        l.pathname.slice(1).split('/').slice(pathSegmentsToKeep).join('/').replace(/&/g, '~and~') +
-        (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
-        l.hash
-      );
+      (function(l) {
+        if (l.search[1] === '/' ) {
+          var decoded = l.search.slice(1).split('&').map(function(s) { 
+            return s.replace(/~and~/g, '&') 
+          }).join('?');
+          window.history.replaceState(null, null,
+              l.pathname.slice(0, -1) + decoded + l.hash
+          );
+        }
+      }(window.location))
     </script>
+    <script type="module" crossorigin src="/School_lunch_menu/assets/index-CI_HCMlU.js"></script>
+    <link rel="stylesheet" crossorigin href="/School_lunch_menu/assets/index-IySqKDMD.css">
   </head>
   <body>
+    <div id="root"></div>
   </body>
 </html>

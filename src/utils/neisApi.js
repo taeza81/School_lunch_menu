@@ -5,55 +5,187 @@
 const NEIS_API_BASE = 'https://open.neis.go.kr/hub';
 
 /**
- * 환경변수 또는 발급받은 NEIS API 키 반환
+ * 시/도 교육청 코드 매핑
  */
-export function getNeisApiKey() {
-  return import.meta.env.VITE_NEIS_API_KEY || 'd765dc21b0d94369aab17c18d89e51fe';
+export const REGION_OFFICE_MAP = {
+  '서울': 'B10',
+  '부산': 'C10',
+  '대구': 'D10',
+  '인천': 'E10',
+  '광주': 'F10',
+  '전남': 'Q10',
+  '전남광주': 'F10', // 광주(F10) & 전남(Q10) 통합
+  '대전': 'G10',
+  '울산': 'H10',
+  '세종': 'I10',
+  '경기': 'J10',
+  '강원': 'K10',
+  '충북': 'M10',
+  '충남': 'N10',
+  '전북': 'P10',
+  '경북': 'R10',
+  '경남': 'S10',
+  '제주': 'T10'
+};
+
+export const OFFICE_REGION_MAP = {
+  'B10': '서울',
+  'C10': '부산',
+  'D10': '대구',
+  'E10': '인천',
+  'F10': '전남광주', // 광주 -> 전남광주 통합
+  'Q10': '전남광주', // 전남 -> 전남광주 통합
+  'G10': '대전',
+  'H10': '울산',
+  'I10': '세종',
+  'J10': '경기',
+  'K10': '강원',
+  'M10': '충북',
+  'N10': '충남',
+  'P10': '전북',
+  'R10': '경북',
+  'S10': '경남',
+  'T10': '제주'
+};
+
+/**
+ * 학교 코드 표준화: '전남_' 및 '광주_' 접두사를 최신 통합 명칭인 '전남광주_'로 단일화
+ */
+export function normalizeSchoolCode(code) {
+  if (!code) return '';
+  if (code.startsWith('전남_') || code.startsWith('광주_') || code.startsWith('전라남도_') || code.startsWith('광주광역시_')) {
+    const parts = code.split('_');
+    return '전남광주_' + parts.slice(1).join('_');
+  }
+  return code;
 }
 
 /**
- * 전국 학교 검색 API
- * @param {string} keyword - 학교 이름 (예: "은혜학교", "김해은혜")
- * @param {string} region - 지역 필터 (선택 사항, 예: "경남", "경상남도")
+ * DB 호환용 대체 학교 코드 목록 반환 ('경남_' ↔ '경상남도_' 기존 데이터 호환용)
+ * (전남/광주는 기존 등록 데이터가 없으므로 불필요한 레거시 조회를 생략하고 깔끔하게 직접 접근합니다)
+ */
+export function getAlternativeSchoolCodes(code) {
+  if (!code || !code.includes('_')) return [];
+  const parts = code.split('_');
+  const reg = parts[0];
+  const name = parts.slice(1).join('_');
+  const alts = [];
+  if (reg === '경남') {
+    alts.push(`경상남도_${name}`);
+  } else if (reg === '경상남도') {
+    alts.push(`경남_${name}`);
+  }
+  return alts;
+}
+
+/**
+ * 지역명을 표준 규격으로 통일
+ * 정부 NEIS DB 및 행정 통합에 맞추어 '전남'과 '광주'를 모두 '전남광주'로 자동 재명명
+ */
+export function normalizeRegion(region, officeCode = '') {
+  if (officeCode === 'F10' || officeCode === 'Q10') {
+    return '전남광주';
+  }
+  if (officeCode && OFFICE_REGION_MAP[officeCode]) {
+    return OFFICE_REGION_MAP[officeCode];
+  }
+  if (!region) return '';
+  const r = region.trim();
+  // 전남, 광주, 전라남도, 광주광역시는 모두 '전남광주'로 통합
+  if (r.includes('광주') || r.startsWith('전남') || r.startsWith('전라남')) {
+    return '전남광주';
+  }
+  if (r.startsWith('서울')) return '서울';
+  if (r.startsWith('부산')) return '부산';
+  if (r.startsWith('대구')) return '대구';
+  if (r.startsWith('인천')) return '인천';
+  if (r.startsWith('대전')) return '대전';
+  if (r.startsWith('울산')) return '울산';
+  if (r.startsWith('세종')) return '세종';
+  if (r.startsWith('경기')) return '경기';
+  if (r.startsWith('강원')) return '강원';
+  if (r.startsWith('충청북') || r === '충북') return '충북';
+  if (r.startsWith('충청남') || r === '충남') return '충남';
+  if (r.startsWith('전라북') || r === '전북') return '전북';
+  if (r.startsWith('경상북') || r === '경북') return '경북';
+  if (r.startsWith('경상남') || r === '경남') return '경남';
+  if (r.startsWith('제주')) return '제주';
+  return r.slice(0, 2);
+}
+
+/**
+ * 환경변수 또는 발급받은 NEIS API 키 반환
+ */
+export function getNeisApiKey() {
+  return (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_NEIS_API_KEY) || 'd765dc21b0d94369aab17c18d89e51fe';
+}
+
+/**
+ * 전국 학교 검색 API (특수학교, 초등학교, 중학교, 고등학교 등 전체 지원)
+ * @param {string} keyword - 학교 이름 (예: "은혜학교", "김해가야")
+ * @param {string} region - 지역 필터 (선택 사항, 예: "경남", "전남광주", "전체")
+ * @param {string} schoolKind - 학교 종류 필터 (선택 사항, 예: "특수학교", "초등학교", "중학교", "고등학교")
  * @returns {Promise<Array<{ officeCode: string, officeName: string, schoolCode: string, schoolName: string, region: string, address: string, schoolKind: string }>>}
  */
-export async function searchNeisSchools(keyword, region = '') {
+export async function searchNeisSchools(keyword, region = '', schoolKind = '') {
   const cleanKeyword = (keyword || '').trim();
   if (!cleanKeyword) return [];
 
   const apiKey = getNeisApiKey();
-  const url = new URL(`${NEIS_API_BASE}/schoolInfo`);
-  url.searchParams.set('KEY', apiKey);
-  url.searchParams.set('Type', 'json');
-  url.searchParams.set('pIndex', '1');
-  url.searchParams.set('pSize', '40');
-  url.searchParams.set('SCHUL_NM', cleanKeyword);
+  const normRegion = normalizeRegion(region);
 
-  try {
-    const res = await fetch(url.toString());
-    if (!res.ok) {
-      throw new Error(`NEIS API 요청 실패 (상태 코드: ${res.status})`);
+  const fetchOfficeSchools = async (officeCode = '') => {
+    const url = new URL(`${NEIS_API_BASE}/schoolInfo`);
+    url.searchParams.set('KEY', apiKey);
+    url.searchParams.set('Type', 'json');
+    url.searchParams.set('pIndex', '1');
+    url.searchParams.set('pSize', '100'); // 충분한 크기로 누락 방지
+    url.searchParams.set('SCHUL_NM', cleanKeyword);
+    if (officeCode) {
+      url.searchParams.set('ATPT_OFCDC_SC_CODE', officeCode);
     }
+    const res = await fetch(url.toString());
+    if (!res.ok) return [];
     const data = await res.json();
-
     if (!data.schoolInfo || !data.schoolInfo[1] || !data.schoolInfo[1].row) {
       return [];
     }
+    return data.schoolInfo[1].row;
+  };
 
-    const rows = data.schoolInfo[1].row;
+  try {
+    let rows = [];
+    if (normRegion === '전남광주') {
+      // 전남광주 선택 시 광주(F10)와 전남(Q10) 양쪽 교육청 데이터를 병렬 조회하여 완벽 통합!
+      const [gwangjuRows, jeonnamRows] = await Promise.all([
+        fetchOfficeSchools('F10'),
+        fetchOfficeSchools('Q10')
+      ]);
+      rows = [...gwangjuRows, ...jeonnamRows];
+    } else if (normRegion && REGION_OFFICE_MAP[normRegion]) {
+      rows = await fetchOfficeSchools(REGION_OFFICE_MAP[normRegion]);
+    } else {
+      rows = await fetchOfficeSchools('');
+    }
+
     let schools = rows.map((item) => ({
-      officeCode: item.ATPT_OFCDC_SC_CODE, // 관할 교육청 코드 (예: S10)
-      officeName: item.ATPT_OFCDC_SC_NM,   // 교육청 명칭 (예: 경상남도교육청)
-      schoolCode: item.SD_SCHUL_CODE,      // 행정 표준 학교 코드 (예: 9010001)
+      officeCode: item.ATPT_OFCDC_SC_CODE, // 관할 교육청 코드 (예: F10, Q10, S10)
+      officeName: item.ATPT_OFCDC_SC_NM,   // 교육청 명칭 (예: 광주광역시교육청, 전라남도교육청)
+      schoolCode: item.SD_SCHUL_CODE,      // 행정 표준 학교 코드 (예: 9010536)
       schoolName: item.SCHUL_NM,           // 학교명
-      region: item.LCTN_SC_NM,             // 지역 (예: 경상남도)
-      address: item.ORG_RDNMA || item.ORG_RDNZC || '', // 도로명 주소
-      schoolKind: item.SCHUL_KND_SC_NM || '학교'       // 특수학교/초등학교 등
+      region: normalizeRegion(item.LCTN_SC_NM, item.ATPT_OFCDC_SC_CODE) || '기타', // '전남광주'로 완벽 통합 재명명
+      address: item.ORG_RDNMA || item.ORG_RDNDA || item.ORG_RDNZC || '', // 도로명 주소
+      schoolKind: item.SCHUL_KND_SC_NM || '학교'       // 특수학교/초등학교/중학교/고등학교 등
     }));
 
-    if (region) {
-      const cleanRegion = region.replace(/(특별시|광역시|특별자치시|특별자치도|도)/g, '').trim();
-      schools = schools.filter(s => s.region.includes(cleanRegion) || s.officeName.includes(cleanRegion));
+    // 지역 필터링 (전체 지역 검색 시 후처리 보강)
+    if (normRegion) {
+      schools = schools.filter(s => s.region === normRegion || s.officeName.includes(normRegion));
+    }
+
+    // 학교 종류 필터링 (특수학교 / 초등학교 / 중학교 / 고등학교)
+    if (schoolKind && schoolKind !== '전체') {
+      schools = schools.filter(s => s.schoolKind === schoolKind || s.schoolKind.includes(schoolKind));
     }
 
     return schools;
@@ -210,26 +342,27 @@ export async function fetchNeisMealMenu(officeCode, schoolCode, dateStr) {
  */
 export async function resolveNeisSchoolFromLegacyCode(savedCode) {
   if (!savedCode) return null;
+  const normCode = normalizeSchoolCode(savedCode);
 
-  // 1. 이미 캐시된 NEIS 정보가 있다면 바로 반환
-  const cachedOffice = localStorage.getItem(`neis_office_${savedCode}`);
-  const cachedSchool = localStorage.getItem(`neis_school_${savedCode}`);
-  const cachedName = localStorage.getItem(`neis_name_${savedCode}`);
-  const cachedRegion = localStorage.getItem(`neis_region_${savedCode}`);
+  // 1. 이미 캐시된 NEIS 정보가 있다면 바로 반환 (정규화된 코드 및 원본 코드 모두 체크)
+  const cachedOffice = localStorage.getItem(`neis_office_${normCode}`) || localStorage.getItem(`neis_office_${savedCode}`);
+  const cachedSchool = localStorage.getItem(`neis_school_${normCode}`) || localStorage.getItem(`neis_school_${savedCode}`);
+  const cachedName = localStorage.getItem(`neis_name_${normCode}`) || localStorage.getItem(`neis_name_${savedCode}`);
+  const cachedRegion = localStorage.getItem(`neis_region_${normCode}`) || localStorage.getItem(`neis_region_${savedCode}`);
   if (cachedOffice && cachedSchool) {
     return {
       officeCode: cachedOffice,
       schoolCode: cachedSchool,
-      schoolName: cachedName || savedCode,
+      schoolName: cachedName || normCode,
       region: cachedRegion || ''
     };
   }
 
-  // 2. "지역_학교명" 파싱 (예: "경남_김해은혜학교")
+  // 2. "지역_학교명" 파싱 (예: "경남_김해은혜학교", "전남광주_여수여명학교")
   let region = '';
-  let schoolName = savedCode;
-  if (savedCode.includes('_')) {
-    const parts = savedCode.split('_');
+  let schoolName = normCode;
+  if (normCode.includes('_')) {
+    const parts = normCode.split('_');
     region = parts[0];
     schoolName = parts.slice(1).join('_');
   }
@@ -239,11 +372,13 @@ export async function resolveNeisSchoolFromLegacyCode(savedCode) {
     if (results && results.length > 0) {
       // 가장 일치하는 학교 선택
       const matched = results.find(s => s.schoolName === schoolName) || results[0];
-      // 캐시 저장
-      localStorage.setItem(`neis_office_${savedCode}`, matched.officeCode);
-      localStorage.setItem(`neis_school_${savedCode}`, matched.schoolCode);
-      localStorage.setItem(`neis_name_${savedCode}`, matched.schoolName);
-      localStorage.setItem(`neis_region_${savedCode}`, matched.region);
+      // 캐시 저장 (새 코드와 과거 코드 둘 다 저장하여 상호 호환 보장)
+      [normCode, savedCode].forEach(c => {
+        localStorage.setItem(`neis_office_${c}`, matched.officeCode);
+        localStorage.setItem(`neis_school_${c}`, matched.schoolCode);
+        localStorage.setItem(`neis_name_${c}`, matched.schoolName);
+        localStorage.setItem(`neis_region_${c}`, matched.region);
+      });
       return matched;
     }
   } catch (e) {

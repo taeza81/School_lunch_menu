@@ -4,6 +4,7 @@ import { db } from '../firebase'
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore'
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
 import { Maximize, Minimize, Shrink, Expand, Home, Printer, Volume2, ChevronLeft, ChevronRight, ZoomIn, X } from 'lucide-react'
+import { fetchNeisMeal } from '../utils/neisApi'
 
 // Steps: 1(요일송), 2(날짜), 3(날씨), 4(급식안내), 5(드래그앤드롭), 6(활동지)
 export default function StudentActivity() {
@@ -56,23 +57,55 @@ export default function StudentActivity() {
       
       if (!schoolCode) return;
 
+      let schoolInfo = null
+      try {
+        schoolInfo = JSON.parse(localStorage.getItem('schoolInfo'))
+      } catch (e) {}
+
+      // 나이스 폴백 헬퍼
+      const tryFetchNeisFallback = async () => {
+        if (schoolInfo?.atptCode && schoolInfo?.neisCode) {
+          try {
+            const res = await fetchNeisMeal(schoolInfo.atptCode, schoolInfo.neisCode, dateStr)
+            if (res.success && res.parsedMenus) {
+              const p = res.parsedMenus
+              setMenus({
+                rice: { name: p.rice || '', imageUrl: '', type: 'rice' },
+                soup: { name: p.soup || '', imageUrl: '', type: 'soup' },
+                side1: { name: p.side1 || '', imageUrl: '', type: 'side1' },
+                side2: { name: p.side2 || '', imageUrl: '', type: 'side2' },
+                side3: { name: p.side3 || '', imageUrl: '', type: 'side3' },
+                side4: { name: p.side4 || '', imageUrl: '', type: 'side4' },
+              })
+              return true
+            }
+          } catch (err) {
+            console.warn("나이스 급식 자동 fallback 실패:", err)
+          }
+        }
+        return false
+      }
+
       try {
         if (isMock) {
           const localData = localStorage.getItem(`menus_${schoolCode}_${dateStr}`)
           if (localData) {
             setMenus(JSON.parse(localData))
           } else {
-            setMenus(null)
+            const ok = await tryFetchNeisFallback()
+            if (!ok) setMenus(null)
           }
           return
         }
         
         const docRef = doc(db, 'schools', schoolCode, 'menus', dateStr)
         const docSnap = await getDoc(docRef)
-        if (docSnap.exists()) {
+        if (docSnap.exists() && docSnap.data().menus) {
           setMenus(docSnap.data().menus)
         } else {
-          setMenus(null)
+          // Firestore에 메뉴가 등록되지 않은 경우 나이스에서 실시간 급식 조회
+          const ok = await tryFetchNeisFallback()
+          if (!ok) setMenus(null)
         }
       } catch (error) {
         console.error(error)
@@ -80,7 +113,8 @@ export default function StudentActivity() {
         if (localData) {
           setMenus(JSON.parse(localData))
         } else {
-          setMenus(null)
+          const ok = await tryFetchNeisFallback()
+          if (!ok) setMenus(null)
         }
       }
     }
